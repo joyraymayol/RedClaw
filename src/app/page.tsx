@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import {
   Activity,
@@ -200,22 +201,37 @@ export default function LandingPage() {
 
         {/* CTA */}
         <section className="border-t">
-          <div className="mx-auto w-full max-w-6xl px-6 py-20 text-center">
-            <h2 className="text-2xl font-semibold tracking-tight text-balance sm:text-3xl">
-              Put your plant floor on{" "}
-              <span className="text-primary">RedClaw</span>.
-            </h2>
-            <p className="mx-auto mt-4 max-w-md text-muted-foreground">
-              Sign in with your maintenance account and pick up where the last
-              shift left off.
-            </p>
-            <Link
-              href="/login"
-              className={cn(buttonVariants({ size: "lg" }), "mt-8 px-6")}
-            >
-              Sign in
-              <ArrowRight data-icon="inline-end" />
-            </Link>
+          <div className="mx-auto grid w-full max-w-6xl items-center gap-12 px-6 py-20 lg:grid-cols-2">
+            <div>
+              <h2 className="text-2xl font-semibold tracking-tight text-balance sm:text-3xl">
+                Put your plant floor on{" "}
+                <span className="text-primary">RedClaw</span>.
+              </h2>
+              <p className="mt-4 max-w-md text-muted-foreground">
+                Sign in with your maintenance account and pick up where the
+                last shift left off.
+              </p>
+              <Link
+                href="/login"
+                className={cn(buttonVariants({ size: "lg" }), "mt-8 px-6")}
+              >
+                Sign in
+                <ArrowRight data-icon="inline-end" />
+              </Link>
+            </div>
+            <div className="relative mx-auto w-full max-w-md">
+              <div
+                aria-hidden
+                className="absolute -inset-6 -z-10 rounded-full bg-primary/10 blur-2xl"
+              />
+              <Image
+                src="/hero-workshop-redclaw.png"
+                alt="Pixel-art RedClaw lobster tuning a lathe in a workshop"
+                width={1024}
+                height={1024}
+                className="h-auto w-full rounded-xl border shadow-lg"
+              />
+            </div>
           </div>
         </section>
       </main>
