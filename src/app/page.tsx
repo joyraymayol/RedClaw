@@ -1,4 +1,3 @@
-import Image from "next/image";
 import Link from "next/link";
 import {
   Activity,
@@ -92,8 +91,8 @@ export default function LandingPage() {
             aria-hidden
             className="pointer-events-none absolute -top-48 right-[-10%] size-[34rem] rounded-full bg-primary/10 blur-3xl"
           />
-          <div className="relative mx-auto grid w-full max-w-6xl items-center gap-14 px-6 py-20 lg:grid-cols-2 lg:py-28">
-            <div className="animate-in fade-in slide-in-from-bottom-4 fill-mode-both duration-700">
+          <div className="relative mx-auto w-full max-w-6xl px-6 py-24 lg:py-36">
+            <div className="animate-in fade-in slide-in-from-bottom-4 fill-mode-both max-w-4xl duration-700">
               <p className="inline-flex items-center gap-2 rounded-full border bg-card/60 px-3 py-1 font-mono text-[11px] tracking-wide text-muted-foreground">
                 <span className="relative flex size-2">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
@@ -101,16 +100,16 @@ export default function LandingPage() {
                 </span>
                 SYSTEMS ONLINE · BUILT FOR THE PLANT FLOOR
               </p>
-              <h1 className="mt-6 text-4xl font-semibold tracking-tight text-balance sm:text-5xl">
+              <h1 className="mt-8 text-5xl font-semibold tracking-tight text-balance sm:text-6xl lg:text-7xl">
                 Every machine. Every ticket.{" "}
                 <span className="text-primary">Under control.</span>
               </h1>
-              <p className="mt-5 max-w-prose text-lg text-muted-foreground">
-                RedClaw is the maintenance command center for your factory —
+              <p className="mt-7 max-w-2xl text-lg text-muted-foreground sm:text-xl">
+                RedClaw is the maintenance command center for Plaspack —
                 raise work orders, dispatch technicians, schedule preventive
                 maintenance, and keep downtime where it belongs: on a report.
               </p>
-              <div className="mt-8 flex flex-wrap items-center gap-3">
+              <div className="mt-10 flex flex-wrap items-center gap-3">
                 <Link
                   href="/login"
                   className={cn(buttonVariants({ size: "lg" }), "px-5")}
@@ -128,38 +127,9 @@ export default function LandingPage() {
                   Explore features
                 </a>
               </div>
-              <p className="mt-10 font-mono text-[11px] tracking-wide text-muted-foreground">
+              <p className="mt-14 font-mono text-[11px] tracking-wide text-muted-foreground">
                 MTBF · MTTR TRACKED&ensp;/&ensp;SLA TIMERS&ensp;/&ensp;AUDIT-READY HISTORY
               </p>
-            </div>
-
-            <div className="animate-in fade-in slide-in-from-bottom-4 fill-mode-both relative delay-150 duration-700">
-              <div
-                aria-hidden
-                className="absolute -inset-8 -z-10 rounded-full bg-primary/10 blur-2xl"
-              />
-              <div className="relative rounded-2xl border bg-card p-2 shadow-lg">
-                <span aria-hidden className="absolute -top-1.5 -left-1.5 size-4 border-t-2 border-l-2 border-primary/70" />
-                <span aria-hidden className="absolute -top-1.5 -right-1.5 size-4 border-t-2 border-r-2 border-primary/70" />
-                <span aria-hidden className="absolute -bottom-1.5 -left-1.5 size-4 border-b-2 border-l-2 border-primary/70" />
-                <span aria-hidden className="absolute -right-1.5 -bottom-1.5 size-4 border-r-2 border-b-2 border-primary/70" />
-                <div className="flex items-center gap-1.5 px-3 py-2">
-                  <span className="size-2 rounded-full bg-muted-foreground/30" />
-                  <span className="size-2 rounded-full bg-muted-foreground/30" />
-                  <span className="size-2 rounded-full bg-primary/70" />
-                  <span className="ml-auto font-mono text-[10px] tracking-wider text-muted-foreground">
-                    REDCLAW://WORKSHOP-01
-                  </span>
-                </div>
-                <Image
-                  src="/hero-workshop-redclaw.png"
-                  alt="Pixel-art RedClaw lobster tuning a lathe in a workshop"
-                  width={1024}
-                  height={1024}
-                  priority
-                  className="h-auto w-full rounded-lg"
-                />
-              </div>
             </div>
           </div>
         </section>

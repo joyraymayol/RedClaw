@@ -129,6 +129,51 @@
   }
 }
 
+/* --- Landing hero schematic (src/components/hero-schematic.tsx) --- */
+@keyframes rc-spin {
+  to { transform: rotate(1turn); }
+}
+@keyframes rc-spin-rev {
+  to { transform: rotate(-1turn); }
+}
+@keyframes rc-ratchet {
+  0%, 42%, 100% { transform: rotate(0deg); }
+  58% { transform: rotate(-18deg); }
+  72% { transform: rotate(3deg); }
+}
+@keyframes rc-trace {
+  from { stroke-dashoffset: 600; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes rc-pip {
+  0%, 38%, 100% { fill: var(--muted-foreground); opacity: 0.3; }
+  8%, 24% { fill: var(--primary); opacity: 1; }
+}
+@keyframes rc-blink {
+  50% { opacity: 0; }
+}
+@keyframes rc-scan {
+  to { transform: translateY(468px); }
+}
+@keyframes rc-dash-crawl {
+  to { stroke-dashoffset: -100; }
+}
+
+.rc-gear-cw { animation: rc-spin 26s linear infinite; }
+/* 8-tooth pinion driven by the 12-tooth gear: 26s × 8/12 */
+.rc-gear-ccw { animation: rc-spin-rev 17.33s linear infinite; }
+.rc-ratchet { animation: rc-ratchet 4.5s ease-in-out infinite; }
+.rc-trace { animation: rc-trace 4.5s linear infinite; }
+.rc-pip { animation: rc-pip 5s infinite; }
+.rc-blink { animation: rc-blink 1.2s step-end infinite; }
+.rc-scan { animation: rc-scan 9s linear infinite; }
+.rc-dash-crawl { animation: rc-dash-crawl 24s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rc-schematic *,
+  .rc-schematic { animation: none !important; }
+}
+
 @utility bg-blueprint {
   background-image:
     linear-gradient(to right, color-mix(in oklch, var(--border), transparent 55%) 1px, transparent 1px),
