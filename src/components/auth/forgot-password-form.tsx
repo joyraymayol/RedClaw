@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useActionState } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
@@ -15,29 +15,26 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { sendPasswordReset, type AuthFormState } from "@/lib/actions/auth";
 
-// TODO(Phase 0): call Supabase resetPasswordForEmail once auth is wired.
 export function ForgotPasswordForm() {
-  const [notice, setNotice] = useState<string | null>(null);
+  const [state, formAction, pending] = useActionState<AuthFormState, FormData>(
+    sendPasswordReset,
+    {}
+  );
 
   return (
     <Card className="w-full">
       <CardHeader>
         <CardTitle className="text-lg">Reset your password</CardTitle>
         <CardDescription>
-          Enter your work email and we&apos;ll send you a reset link.
+          Enter your email and we&apos;ll send you a reset link. If you only
+          sign in with Google, this also lets you add a password to your
+          account.
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setNotice(
-              "Password reset isn't wired up yet — Supabase Auth lands in Phase 0 of the build plan."
-            );
-          }}
-        >
+        <form className="space-y-4" action={formAction}>
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <Input
@@ -45,20 +42,28 @@ export function ForgotPasswordForm() {
               name="email"
               type="email"
               autoComplete="email"
-              placeholder="you@plaspack.com"
+              placeholder="you@gmail.com"
               required
             />
           </div>
-          <Button type="submit" className="w-full">
-            Send reset link
+          <Button type="submit" className="w-full" disabled={pending}>
+            {pending ? "Sending…" : "Send reset link"}
           </Button>
         </form>
-        {notice && (
+        {state.success && (
           <p
             role="status"
             className="mt-4 rounded-md border bg-muted/50 p-2.5 text-xs text-muted-foreground"
           >
-            {notice}
+            {state.success}
+          </p>
+        )}
+        {state.error && (
+          <p
+            role="alert"
+            className="border-destructive/30 text-destructive mt-4 rounded-md border bg-destructive/5 p-2.5 text-xs"
+          >
+            {state.error}
           </p>
         )}
       </CardContent>
