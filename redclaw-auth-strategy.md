@@ -2,13 +2,55 @@
 
 Companion notes to `redclaw-cmms-plan.md`, covering how employee identities get into the system at launch and how sign-in reconciles across methods (email/password vs. Google).
 
+> **Decision (2026-07-13):** self-serve Google sign-up + admin approval is the **primary** provisioning path (implemented in Phase 0). Bulk email invites (§5) are deferred to a future in-app admin action.
+
 ---
 
-## 1. Seeding employees: pre-invite, don't pre-insert
+## 1. Primary path: self-serve Google sign-up + admin approval
 
-Don't seed `public.User` rows directly from the head admin's employee email list. A `User` row with no matching `auth.users` row is orphaned — the Postgres mirror trigger creates `public.User` *from* `auth.users`, not the other way around, so a hand-inserted row can never be logged into.
+Employees seed their own accounts — even before launch — by signing in with Google (personal Gmail accounts; no Workspace domain restriction available):
 
-Instead, the admin's employee list drives a **bulk invite** via Supabase's Admin API:
+1. **Sign-up = Google sign-in.** There is no registration form. "Continue with Google" creates the `auth.users` row; a Postgres mirror trigger (`on_auth_user_created`, see §2) immediately creates `public.User` with `status = PENDING_PROFILE`, `role = NULL`, `isActive = false`, name/avatar prefilled from Google metadata.
+2. **Profile completion (`/onboarding`).** First sign-in routes to a form: full name (prefilled), department + position (dropdowns from `src/lib/constants/org.ts`). Submitting moves the account to `status = PENDING_APPROVAL`.
+3. **Holding page (`/pending-approval`).** Until approved, every sign-in lands here — the account can access nothing. `requireActiveUser()` in `src/lib/auth.ts` denies by construction for any non-`ACTIVE` status.
+4. **Admin review (`/admin/users`).** ADMIN/HEAD users see all accounts, pending first, and approve by assigning one of the five roles (`status → ACTIVE`, `isActive → true`). **Verify people by their email** — the email is Google-verified; the typed name/department are self-reported. Accounts can also be disabled there.
+
+**Account lifecycle:** `PENDING_PROFILE → PENDING_APPROVAL → ACTIVE` (+ `DISABLED`), stored as an explicit `AccountStatus` enum on `User` — one authoritative column instead of inferring state from `role IS NULL` in several places.
+
+**Admin bootstrap:** the first admin can't be approved by anyone. `prisma/seed.ts` promotes the emails in `ADMIN_BOOTSTRAP_EMAILS` to ADMIN/ACTIVE after their first Google sign-in (`npm run db:seed`).
+
+## 2. Mirror trigger (auth.users → public.User)
+
+`prisma/migrations/*_auth_user_mirror/migration.sql` (hand-written SQL — never `prisma db push`):
+
+- `AFTER INSERT ON auth.users` → insert `public."User"` with id/email/name/avatar from `raw_user_meta_data`, `ON CONFLICT DO NOTHING`.
+- A client that never calls a sync endpoint can't skip it. `getCurrentUser()` also has an upsert fallback for rows that predate the trigger.
+- Same migration enables RLS (no policies) on `public."User"` so Supabase's anon/authenticated REST roles can't touch it; all app access goes through Prisma as the table owner.
+
+## 3. Sign-in methods & password recovery
+
+Both doors stay open on `/login`:
+
+- **Google** (the only sign-*up* path) — `signInWithOAuth` → `/auth/callback` (code exchange) → DAL routes by status.
+- **Email + password** — for accounts that added a password later (see §4). No password sign-up exists; Supabase's email-provider sign-ups should be disabled in the dashboard (Google provider stays on).
+
+**Forgot / set password:** `/forgot-password` → `resetPasswordForEmail` → email link → `/auth/callback?next=/reset-password` → set new password. For Google-only accounts this is also how a password gets **added** to the account (the form copy says so).
+
+## 4. Cross-method sign-in behavior (Supabase automatic identity linking)
+
+Governed by Supabase's automatic identity linking, which links by **verified email** — asymmetric depending on which method came first.
+
+**Signed up via Google → sign in with email+password later?**
+Not immediately. Google signup creates the `auth.users` row with a Google identity but no password. The user gains password sign-in via "Forgot password" (`resetPasswordForEmail` → `updateUser({ password })`), which sets a password on that same account. After that, both methods work on the one row.
+
+**Signed up via email+password → sign in with Google later?**
+Yes, automatically — provided the original email was confirmed. Google's OAuth email is always verified, and Supabase auto-links a new OAuth identity to an existing account when both sides have a verified email. Same `auth.users.id`, same mirrored `public.User` row, same role.
+
+**Caveat:** auto-linking depends on email confirmation having actually happened on the first method. Keep "Confirm email" **enabled** in Supabase Authentication settings.
+
+## 5. Deferred: bulk email invites
+
+The previously planned invite flow stays viable as a future admin convenience ("Invite employee" action for new hires), but is no longer launch-blocking:
 
 ```ts
 await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
@@ -17,52 +59,11 @@ await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
 });
 ```
 
-This immediately creates the real `auth.users` row (known UUID) and fires the mirror trigger, which reads `raw_user_meta_data` to populate `public.User.role` correctly from day one. Supabase emails each employee an invite link.
+If/when built: the mirror trigger already reads `raw_user_meta_data`, so invited users would arrive with name prefilled; an `/accept-invite` page (set password) would be added then. Invited-with-role provisioning would need the trigger extended to read a `role` key.
 
-- Launch day: run as a one-off `scripts/bulk-invite.ts` against the admin's list.
-- Ongoing: promote the same function into an in-app "Invite employee" admin action for new hires.
+## 6. Security posture
 
-## 2. First sign-in
-
-Clicking the invite link lands the employee on `/accept-invite` with a valid Supabase session, where they set a password (`supabase.auth.updateUser({ password })`). From then on they can sign in with email + password.
-
-**"Continue with Google" maps directly to the same account** — since the account (and email) already exists from the invite, and the invite-accept step confirms the email, Google OAuth against that same email links automatically. No extra admin step, no duplicate row; role is already present from the seed.
-
-## 3. Unmatched Google sign-in (walk-ins not on the list)
-
-Google OAuth isn't restricted to the seed list unless the Google provider is also configured with domain restriction (`hd` param) — a cheap extra filter, but not the security boundary.
-
-Handle it explicitly:
-- Mirror trigger: if no invite metadata exists on the new `auth.users` row, create `public.User` with `role = NULL`, `isActive = false`.
-- `getCurrentUser()` / middleware: `role IS NULL` → redirect to a "Pending approval — contact your maintenance admin" holding page, not the app shell. `authz.can()` denies everything for a null role by construction.
-- Admin gets a **Pending Users** screen (`User` rows where `role IS NULL`) to assign a role and flip `isActive = true`. Next login, they're in.
-
-## 4. Forgot password
-
-Already stubbed in `src/components/auth/forgot-password-form.tsx`. Standard flow:
-
-1. `supabase.auth.resetPasswordForEmail(email, { redirectTo: '/reset-password' })`
-2. Email link → `/reset-password` → `supabase.auth.updateUser({ password })` using the recovery session Supabase attaches to the redirect.
-
-Nice-to-have (not launch-blocking): detect via an admin-privileged (service role) lookup when an account has no password credential yet and only signs in via Google, and tailor the "forgot password" messaging accordingly instead of silently emailing a reset link.
-
-## 5. Cross-method sign-in behavior (Supabase automatic identity linking)
-
-Governed by Supabase's automatic identity linking, which links by **verified email** — asymmetric depending on which method came first.
-
-**Signed up via Google → sign in with email+password later?**
-Not immediately. Google signup creates the `auth.users` row with a Google identity but no password set. The user gains password sign-in only after going through "Forgot password" (`resetPasswordForEmail` → `updateUser({ password })`), which sets a password on that same account (matched by email). After that, both methods work on the one row.
-
-**Signed up via email+password → sign in with Google later?**
-Yes, automatically — provided the original email was confirmed. Google's OAuth email is always verified on Google's side, and Supabase auto-links a new OAuth identity to an existing account when both sides have a verified email for that address. "Continue with Google" becomes a second door into the same `auth.users.id` / same mirrored `public.User` row / same role. No duplicate account, no admin step.
-
-**Why this matters for our invite-based design:** employees arrive via the invite-accept link, which confirms their email as part of acceptance. By the time any of them clicks "Continue with Google," their email is already verified server-side — so Google sign-in cleanly links to their pre-provisioned, pre-roled account every time. The "unmatched Google email" case (§3) only applies to genuine walk-ins who were never invited.
-
-**Caveat:** auto-linking depends on email confirmation having actually happened on the first method. If "Confirm email" is ever disabled in the Supabase project's Authentication settings, linking can behave differently (may error instead of link). Worth confirming that setting is on before launch, since this whole reconciliation story leans on it.
-
-## 6. Plan doc delta
-
-`redclaw-cmms-plan.md`'s auth notes (mirror trigger via Postgres trigger on `auth.users`) should be tightened to:
-- Read `user_metadata` (role/name/department) in the trigger for the invited case.
-- Add the `role IS NULL` → pending-approval branch for the walk-in case.
-- Add the bulk-invite script / admin "Invite employee" action and "Pending Users" screen to the Phase 0 task list.
+- The **DAL is the boundary** (`src/lib/auth.ts`): Next.js 16's proxy doesn't intercept Server Actions and layouts don't re-render on navigation, so every protected page and every Server Action calls `requireUser` / `requireActiveUser` / `requireRole`. Rule: no Prisma write without a `require*` call above it.
+- `supabase.auth.getUser()` (JWT validated server-side) everywhere — never `getSession()`.
+- Once the app URL is public, anyone can create a *pending* account; the pending gate plus admin approval is the intended control. Impersonation of a colleague's name is caught at review time (procedural: check the roster against the Google-verified email).
+- Google OAuth consent screen: while in "Testing" mode only listed test users can sign in (cap 100); publish before employee rollout.

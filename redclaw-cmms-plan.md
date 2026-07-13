@@ -566,11 +566,13 @@ prisma/
 ├── migrations/
 └── seed.ts                         # roles, sample machines, problem types, SLA defaults
 
-middleware.ts                        # session presence only — authorization lives in authz.ts
+src/proxy.ts                         # session presence only — authorization lives in authz.ts
+                                     # (Next.js 16 renamed middleware.ts → proxy.ts)
 ```
 
 **Auth notes:**
 - Use Supabase Auth for login/session; mirror `auth.users.id` into your Prisma `User.id` (uuid) **via a Postgres trigger on `auth.users`** so the mirror row is created the moment a user signs up — a client that never calls a sync endpoint can't skip it. (An API-side sync call is an acceptable fallback, but the trigger is the primary path.)
+- **Provisioning is self-serve (decided 2026-07-13, implemented in Phase 0):** employees sign up with Google, complete a profile form (`/onboarding`), and wait on `/pending-approval` until an ADMIN/HEAD assigns a role at `/admin/users`. Account lifecycle is an explicit `AccountStatus` enum (`PENDING_PROFILE → PENDING_APPROVAL → ACTIVE`, + `DISABLED`) with `role` nullable until approval. Details in `redclaw-auth-strategy.md`.
 - Supabase Row Level Security (RLS) is optional here since you're going through Prisma with a server-side service role — but if you ever query Supabase directly from the client, turn RLS on and mirror the same role checks. The **service-role key must never reach the client** — it lives only in server env (`lib/env.ts` enforces this by keeping it out of `NEXT_PUBLIC_*`).
 
 **Storage rules:** attachments go in a **private** bucket. Validate file size and MIME type on upload (photos + PDFs, sensible cap like 10 MB), store only the bucket path (`TicketAttachment.storagePath`), and serve through short-lived signed URLs generated server-side. Fault photos of your factory floor should not be permanently reachable by anyone holding an old URL.
@@ -659,10 +661,10 @@ On submit → `createTicket` server action → re-validates with the same zod sc
 
 ### Phase 0 — Foundation
 Everything here is cheap now and expensive to retrofit.
-1. Scaffold: Next.js + Tailwind + shadcn/ui, Prisma + Supabase wiring, `lib/env.ts` zod-validated env.
-2. Auth: Supabase login, `auth.users` → `User` mirror trigger, `getCurrentUser()`.
-3. Role-aware app shell (sidebar, `role-gate`), plus `authz.ts` `can()` skeleton.
-4. Initial migration + `seed.ts` (users per role, machines, problem types, SLA defaults).
+1. ✅ Scaffold: Next.js + Tailwind + shadcn/ui, Prisma + Supabase wiring, `lib/env.ts` zod-validated env.
+2. ✅ Auth: Supabase login (Google OAuth + email/password), `auth.users` → `User` mirror trigger, DAL (`getCurrentUser()` / `requireActiveUser()` / `requireRole()`), forgot/reset password.
+3. ✅ Self-serve provisioning: `/onboarding` profile form (department/position dropdowns), `/pending-approval` holding page, `/admin/users` approval screen, `seed.ts` admin bootstrap via `ADMIN_BOOTSTRAP_EMAILS`. (Full sidebar shell, `role-gate`, and the `authz.ts` `can()` matrix move to Phase 1.)
+4. ✅ Initial migrations (User + mirror trigger + RLS). Seeding of machines/problem types/SLA defaults lands with their Phase 1–2 features.
 5. CI (GitHub Actions): lint + typecheck + unit tests on every push; `prisma migrate diff` check so schema drift fails loudly.
 
 ### Phase 1 — Core ticket flow (MVP)
