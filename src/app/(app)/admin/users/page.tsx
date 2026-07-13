@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { UserRowActions } from "@/components/admin/user-row-actions";
-import { Badge } from "@/components/ui/badge";
+import { UserActionsDialog } from "@/components/admin/user-actions-dialog";
+import { UserStatusBadge } from "@/components/admin/user-status-badge";
 import {
   Table,
   TableBody,
@@ -12,7 +12,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { Prisma } from "@/generated/prisma/client";
-import type { AccountStatus } from "@/generated/prisma/enums";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { cn } from "@/lib/utils";
@@ -33,16 +32,6 @@ const FILTERS: { key: string; label: string; where?: Prisma.UserWhereInput }[] =
     { key: "disabled", label: "Disabled", where: { status: "DISABLED" } },
   ];
 
-const STATUS_BADGE: Record<
-  AccountStatus,
-  { label: string; variant: "default" | "secondary" | "destructive" | "outline" }
-> = {
-  PENDING_PROFILE: { label: "Awaiting profile", variant: "outline" },
-  PENDING_APPROVAL: { label: "Needs approval", variant: "default" },
-  ACTIVE: { label: "Active", variant: "secondary" },
-  DISABLED: { label: "Disabled", variant: "destructive" },
-};
-
 export default async function AdminUsersPage({
   searchParams,
 }: {
@@ -51,9 +40,7 @@ export default async function AdminUsersPage({
   const admin = await requireRole("ADMIN", "HEAD");
   const { filter: filterParam } = await searchParams;
 
-  const filter =
-    FILTERS.find((f) => f.key === filterParam) ??
-    FILTERS[0];
+  const filter = FILTERS.find((f) => f.key === filterParam) ?? FILTERS[0];
 
   const [users, pendingCount] = await Promise.all([
     prisma.user.findMany({
@@ -83,7 +70,9 @@ export default async function AdminUsersPage({
         {FILTERS.map((f) => (
           <Link
             key={f.key}
-            href={f.key === "all" ? "/admin/users" : `/admin/users?filter=${f.key}`}
+            href={
+              f.key === "all" ? "/admin/users" : `/admin/users?filter=${f.key}`
+            }
             className={cn(
               "rounded-md px-2.5 py-1.5 text-sm transition-colors",
               f.key === filter.key
@@ -97,16 +86,19 @@ export default async function AdminUsersPage({
       </div>
 
       <div className="overflow-x-auto rounded-lg border">
+        {/* Narrow screens keep three columns (name+email, status, actions);
+            the rest appear as the viewport widens. Full details and all
+            actions live in the per-row dialog. */}
         <Table className="[&_td]:px-4 [&_td]:py-3 [&_th]:px-4">
           <TableHeader>
             <TableRow>
               <TableHead>Name</TableHead>
-              <TableHead>Email</TableHead>
-              <TableHead>Department</TableHead>
-              <TableHead>Position</TableHead>
+              <TableHead className="hidden md:table-cell">Email</TableHead>
+              <TableHead className="hidden lg:table-cell">Department</TableHead>
+              <TableHead className="hidden lg:table-cell">Position</TableHead>
               <TableHead>Status</TableHead>
-              <TableHead>Joined</TableHead>
-              <TableHead className="text-right">Role / actions</TableHead>
+              <TableHead className="hidden md:table-cell">Joined</TableHead>
+              <TableHead className="text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -120,35 +112,43 @@ export default async function AdminUsersPage({
                 </TableCell>
               </TableRow>
             )}
-            {users.map((u) => {
-              const badge = STATUS_BADGE[u.status];
-              return (
-                <TableRow key={u.id}>
-                  <TableCell className="font-medium">{u.name}</TableCell>
-                  <TableCell className="font-mono text-xs">{u.email}</TableCell>
-                  <TableCell>{u.department ?? "—"}</TableCell>
-                  <TableCell>{u.position ?? "—"}</TableCell>
-                  <TableCell>
-                    <Badge variant={badge.variant}>{badge.label}</Badge>
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {u.createdAt.toLocaleDateString("en-PH", {
-                      year: "numeric",
-                      month: "short",
-                      day: "numeric",
-                    })}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <UserRowActions
-                      userId={u.id}
-                      status={u.status}
-                      role={u.role}
-                      isSelf={u.id === admin.id}
-                    />
-                  </TableCell>
-                </TableRow>
-              );
-            })}
+            {users.map((u) => (
+              <TableRow key={u.id}>
+                <TableCell>
+                  <div className="font-medium">{u.name}</div>
+                  <div className="font-mono text-xs text-muted-foreground md:hidden">
+                    {u.email}
+                  </div>
+                </TableCell>
+                <TableCell className="hidden font-mono text-xs md:table-cell">
+                  {u.email}
+                </TableCell>
+                <TableCell className="hidden lg:table-cell">
+                  {u.department ?? "—"}
+                </TableCell>
+                <TableCell className="hidden lg:table-cell">
+                  {u.position ?? "—"}
+                </TableCell>
+                <TableCell>
+                  <UserStatusBadge status={u.status} />
+                  {u.role && (
+                    <span className="ml-1.5 hidden font-mono text-[10px] text-muted-foreground sm:inline">
+                      {u.role}
+                    </span>
+                  )}
+                </TableCell>
+                <TableCell className="hidden text-xs text-muted-foreground md:table-cell">
+                  {u.createdAt.toLocaleDateString("en-PH", {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </TableCell>
+                <TableCell className="text-right">
+                  <UserActionsDialog user={u} isSelf={u.id === admin.id} />
+                </TableCell>
+              </TableRow>
+            ))}
           </TableBody>
         </Table>
       </div>

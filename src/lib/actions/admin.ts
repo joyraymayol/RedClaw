@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 
 export type AdminActionState = {
   error?: string;
+  success?: boolean;
 };
 
 const assignRoleSchema = z.object({
@@ -48,7 +49,7 @@ export async function assignRole(
   }
 
   revalidatePath("/admin/users");
-  return {};
+  return { success: true };
 }
 
 export async function disableUser(
@@ -71,5 +72,5 @@ export async function disableUser(
   });
 
   revalidatePath("/admin/users");
-  return {};
+  return { success: true };
 }
