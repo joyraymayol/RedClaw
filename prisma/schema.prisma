@@ -1,0 +1,39 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  REQUESTER
+  TECHNICIAN
+  ADMIN
+  SUPERVISOR
+  HEAD
+}
+
+enum AccountStatus {
+  PENDING_PROFILE // mirrored from auth.users; profile form not yet submitted
+  PENDING_APPROVAL // profile done; awaiting admin role assignment
+  ACTIVE
+  DISABLED
+}
+
+model User {
+  id         String        @id // = auth.users.id; supplied by the mirror trigger, never generated here
+  email      String        @unique
+  name       String // prefilled from Google metadata by the mirror trigger
+  role       UserRole? // NULL until an admin approves and assigns one
+  status     AccountStatus @default(PENDING_PROFILE)
+  department String?
+  position   String?
+  avatarUrl  String?
+  isActive   Boolean       @default(false) // kept in sync with status; true only when ACTIVE
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  @@index([status])
+}
