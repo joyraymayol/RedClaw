@@ -34,7 +34,8 @@ export function ForgotPasswordForm() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form className="space-y-4" action={formAction}>
+        {/* suppressHydrationWarning: Chrome iOS injects __gcruniqueid into forms */}
+        <form className="space-y-4" action={formAction} suppressHydrationWarning>
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>
             <Input
