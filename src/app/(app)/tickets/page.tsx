@@ -13,7 +13,7 @@ import {
   TicketsPerPageSelect,
   TicketsSearch,
 } from "@/components/tickets/tickets-table-controls";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -262,8 +262,11 @@ export default async function TicketsPage({
             )}
             {tickets.map((t) => (
               <TableRow key={t.id}>
-                <TableCell className="font-mono text-xs font-medium">
-                  <Link href={`/tickets/${t.id}`} className="hover:underline">
+                <TableCell>
+                  <Link
+                    href={`/tickets/${t.id}`}
+                    className={cn(buttonVariants({ variant: "outline", size: "xs" }), "font-mono")}
+                  >
                     {t.ticketNumber}
                   </Link>
                 </TableCell>

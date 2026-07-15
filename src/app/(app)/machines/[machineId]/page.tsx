@@ -6,6 +6,7 @@ import { MachineFormDialog } from "@/components/machines/machine-form-dialog";
 import { MachineStatusBadge } from "@/components/machines/machine-status-badge";
 import { TicketPriorityBadge } from "@/components/tickets/ticket-priority-badge";
 import { TicketStatusBadge } from "@/components/tickets/ticket-status-badge";
+import { buttonVariants } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -16,6 +17,7 @@ import {
 } from "@/components/ui/table";
 import { requireActiveUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { cn } from "@/lib/utils";
 
 export async function generateMetadata({
   params,
@@ -111,8 +113,11 @@ export default async function MachineDetailPage({
               )}
               {machine.tickets.map((t) => (
                 <TableRow key={t.id}>
-                  <TableCell className="font-mono text-xs">
-                    <Link href={`/tickets/${t.id}`} className="hover:underline">
+                  <TableCell>
+                    <Link
+                      href={`/tickets/${t.id}`}
+                      className={cn(buttonVariants({ variant: "outline", size: "xs" }), "font-mono")}
+                    >
                       {t.ticketNumber}
                     </Link>
                   </TableCell>

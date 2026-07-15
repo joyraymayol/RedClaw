@@ -4,6 +4,7 @@ import Link from "next/link";
 import { MachineFormDialog } from "@/components/machines/machine-form-dialog";
 import { MachinesSearch } from "@/components/machines/machines-search";
 import { MachineStatusBadge } from "@/components/machines/machine-status-badge";
+import { buttonVariants } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -15,6 +16,7 @@ import {
 import type { Prisma } from "@/generated/prisma/client";
 import { requireActiveUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Machines" };
 
@@ -83,10 +85,10 @@ export default async function MachinesPage({
             )}
             {machines.map((m) => (
               <TableRow key={m.id}>
-                <TableCell className="font-mono text-xs font-medium">
+                <TableCell>
                   <Link
                     href={`/machines/${m.id}`}
-                    className="hover:underline"
+                    className={cn(buttonVariants({ variant: "outline", size: "xs" }), "font-mono")}
                   >
                     {m.assetCode}
                   </Link>
