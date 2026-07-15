@@ -12,3 +12,12 @@ export function isUniqueConstraintError(error: unknown, field: string): boolean 
     error.meta.target.includes(field)
   );
 }
+
+/** True if `error` is a Prisma foreign-key-constraint violation (P2003/P2014) — e.g. deleting a row other rows still reference. */
+export function isForeignKeyConstraintError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    (error.code === "P2003" || error.code === "P2014")
+  );
+}

@@ -6,6 +6,7 @@ import { PauseIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -100,6 +101,9 @@ export function TicketHoldDialog({ ticketId }: { ticketId: string }) {
               />
             </div>
             <DialogFooter>
+              <DialogClose render={<Button variant="outline" type="button" />}>
+                Cancel
+              </DialogClose>
               <Button type="submit" disabled={pending}>
                 {pending ? "Saving…" : "Put on hold"}
               </Button>

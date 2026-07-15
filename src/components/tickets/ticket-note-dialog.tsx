@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -89,6 +90,9 @@ export function TicketNoteDialog({
               />
             </div>
             <DialogFooter>
+              <DialogClose render={<Button variant="outline" type="button" />}>
+                Cancel
+              </DialogClose>
               <Button type="submit" disabled={pending}>
                 {pending ? "Submitting…" : submitLabel}
               </Button>

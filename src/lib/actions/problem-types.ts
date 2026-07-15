@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { isUniqueConstraintError } from "@/lib/prisma-errors";
+import { isForeignKeyConstraintError, isUniqueConstraintError } from "@/lib/prisma-errors";
 import { problemTypeSchema } from "@/lib/validations/problem-type";
 
 export type ProblemTypeActionState = {
@@ -34,6 +34,26 @@ export async function createProblemType(
   } catch (e) {
     if (isUniqueConstraintError(e, "name")) {
       return { error: "A problem type with that name already exists." };
+    }
+    throw e;
+  }
+
+  revalidatePath("/knowledge-base");
+  return { success: true };
+}
+
+export async function deleteProblemType(problemTypeId: string): Promise<ProblemTypeActionState> {
+  await requireRole("ADMIN", "HEAD");
+  if (!problemTypeId) return { error: "Missing problem type." };
+
+  try {
+    await prisma.problemType.delete({ where: { id: problemTypeId } });
+  } catch (e) {
+    if (isForeignKeyConstraintError(e)) {
+      return {
+        error:
+          "Can't delete — this problem type is still referenced by existing tickets or solutions.",
+      };
     }
     throw e;
   }

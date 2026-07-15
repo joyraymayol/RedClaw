@@ -6,8 +6,10 @@ import { PencilIcon, PlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -165,13 +167,18 @@ export function MachineFormDialog({ machine }: { machine?: Machine }) {
                 placeholder="Anything worth knowing at a glance"
               />
             </div>
-            <Button type="submit" className="w-full" disabled={pending}>
-              {pending
-                ? "Saving…"
-                : isEdit
-                  ? "Save changes"
-                  : "Add machine"}
-            </Button>
+            <DialogFooter>
+              <DialogClose render={<Button variant="outline" type="button" />}>
+                Cancel
+              </DialogClose>
+              <Button type="submit" disabled={pending}>
+                {pending
+                  ? "Saving…"
+                  : isEdit
+                    ? "Save changes"
+                    : "Add machine"}
+              </Button>
+            </DialogFooter>
           </form>
           {error && (
             <p

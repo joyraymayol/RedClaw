@@ -6,6 +6,7 @@ import { UserPlusIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -102,6 +103,9 @@ export function TicketAssignDialog({
               </Select>
             </div>
             <DialogFooter>
+              <DialogClose render={<Button variant="outline" type="button" />}>
+                Cancel
+              </DialogClose>
               <Button type="submit" disabled={pending}>
                 {pending ? "Saving…" : isReassign ? "Reassign" : "Assign"}
               </Button>

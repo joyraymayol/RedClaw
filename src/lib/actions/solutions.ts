@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { isForeignKeyConstraintError } from "@/lib/prisma-errors";
 import { solutionSchema } from "@/lib/validations/solution";
 
 export type SolutionActionState = {
@@ -53,6 +54,23 @@ export async function updateSolution(
     data: parsed.data,
   });
   if (count === 0) return { error: "Solution not found." };
+
+  revalidatePath("/knowledge-base");
+  return { success: true };
+}
+
+export async function deleteSolution(solutionId: string): Promise<SolutionActionState> {
+  await requireRole("ADMIN", "HEAD");
+  if (!solutionId) return { error: "Missing solution." };
+
+  try {
+    await prisma.solution.delete({ where: { id: solutionId } });
+  } catch (e) {
+    if (isForeignKeyConstraintError(e)) {
+      return { error: "Can't delete — this solution is still referenced by an existing ticket." };
+    }
+    throw e;
+  }
 
   revalidatePath("/knowledge-base");
   return { success: true };
