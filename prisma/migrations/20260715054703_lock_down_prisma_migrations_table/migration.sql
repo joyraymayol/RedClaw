@@ -1,0 +1,12 @@
+-- Hand-written migration (invisible to Prisma introspection).
+--
+-- Prisma's internal migrations ledger lives in the public schema, which
+-- Supabase exposes through the Data API with default grants to the
+-- anon/authenticated roles. Enabling RLS with no policies denies them
+-- access (the postgres/owner connection Prisma uses bypasses RLS), so
+-- migration names and checksums aren't readable by anyone with the
+-- publishable key.
+--
+-- IF EXISTS because the shadow database replays migrations without a
+-- migrations ledger; on real databases the table always exists by now.
+ALTER TABLE IF EXISTS "_prisma_migrations" ENABLE ROW LEVEL SECURITY;
