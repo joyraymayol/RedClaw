@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cmms_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DIRECT_URL: postgresql://postgres:postgres@localhost:5432/cmms_ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      # Migrations reference Supabase's auth schema, which a vanilla
+      # Postgres container lacks — stub just enough for them to apply
+      # (kept in sync with migrations.initShadowDb in prisma.config.ts).
+      - name: Stub Supabase auth schema
+        run: |
+          psql "$DIRECT_URL" <<'SQL'
+            CREATE SCHEMA IF NOT EXISTS auth;
+            CREATE TABLE IF NOT EXISTS auth.users (
+              id uuid PRIMARY KEY,
+              email text,
+              raw_user_meta_data jsonb
+            );
+          SQL
+
+      # Proves every migration applies on a clean database.
+      - name: Apply migrations
+        run: npx prisma migrate deploy
+
+      # Fails (exit code 2) if schema.prisma has drifted from the
+      # migrations directory — i.e. someone edited the schema without
+      # generating a migration.
+      - name: Check schema drift
+        run: |
+          npx prisma migrate diff \
+            --from-config-datasource \
+            --to-schema prisma/schema.prisma \
+            --exit-code
