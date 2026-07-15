@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { MachineFormDialog } from "@/components/machines/machine-form-dialog";
+import { MachinesSearch } from "@/components/machines/machines-search";
 import { MachineStatusBadge } from "@/components/machines/machine-status-badge";
 import {
   Table,
@@ -11,16 +12,35 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { Prisma } from "@/generated/prisma/client";
 import { requireActiveUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export const metadata: Metadata = { title: "Machines" };
 
-export default async function MachinesPage() {
+export default async function MachinesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string }>;
+}) {
   const user = await requireActiveUser();
   const canManage = user.role === "ADMIN" || user.role === "HEAD";
+  const { q: qParam } = await searchParams;
+  const q = qParam?.trim() ?? "";
+
+  const where: Prisma.MachineWhereInput = q
+    ? {
+        OR: [
+          { assetCode: { contains: q, mode: "insensitive" } },
+          { name: { contains: q, mode: "insensitive" } },
+          { category: { contains: q, mode: "insensitive" } },
+          { location: { contains: q, mode: "insensitive" } },
+        ],
+      }
+    : {};
 
   const machines = await prisma.machine.findMany({
+    where,
     orderBy: { assetCode: "asc" },
   });
 
@@ -35,6 +55,8 @@ export default async function MachinesPage() {
         </div>
         {canManage && <MachineFormDialog />}
       </div>
+
+      <MachinesSearch />
 
       <div className="overflow-x-auto rounded-lg border">
         <Table className="[&_td]:px-4 [&_td]:py-3 [&_th]:px-4">
@@ -55,7 +77,7 @@ export default async function MachinesPage() {
                   colSpan={canManage ? 6 : 5}
                   className="py-10 text-center text-sm text-muted-foreground"
                 >
-                  No machines yet.
+                  {q ? `No machines match "${q}".` : "No machines yet."}
                 </TableCell>
               </TableRow>
             )}
