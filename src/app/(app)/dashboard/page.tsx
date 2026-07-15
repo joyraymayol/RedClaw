@@ -30,20 +30,27 @@ export default async function DashboardPage() {
       </div>
 
       <div className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">
-        The maintenance dashboard lands in Phase 1 — tickets, machines, and
-        reports will live here.
+        KPIs and ageing-ticket alerts land in Phase 3 — for now, head
+        straight to Tickets.
       </div>
 
-      {isAdmin && (
-        <Button
-          render={<Link href="/admin/users" />}
-          nativeButton={false}
-          variant="outline"
-          size="sm"
-        >
-          Manage user accounts
+      <div className="flex flex-wrap gap-2">
+        <Button render={<Link href="/tickets" />} nativeButton={false}>
+          View tickets
         </Button>
-      )}
+        <Button render={<Link href="/tickets/new" />} nativeButton={false} variant="outline">
+          Raise a ticket
+        </Button>
+        {isAdmin && (
+          <Button
+            render={<Link href="/admin/users" />}
+            nativeButton={false}
+            variant="outline"
+          >
+            Manage user accounts
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
