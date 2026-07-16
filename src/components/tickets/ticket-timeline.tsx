@@ -24,7 +24,11 @@ export function TicketTimeline({ history }: { history: TimelineEntry[] }) {
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="font-medium">{h.changedBy.name}</span>
               <span className="text-muted-foreground">
-                {h.fromStatus ? "moved this to" : "created this as"}
+                {!h.fromStatus
+                  ? "created this as"
+                  : h.fromStatus === h.toStatus
+                    ? "updated this"
+                    : "moved this to"}
               </span>
               <TicketStatusBadge status={h.toStatus} />
             </div>

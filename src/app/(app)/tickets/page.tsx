@@ -151,7 +151,7 @@ export default async function TicketsPage({
     user.role === "REQUESTER"
       ? { requesterId: user.id }
       : user.role === "TECHNICIAN"
-        ? { assignedTechnicianId: user.id }
+        ? { assignments: { some: { technicianId: user.id, unassignedAt: null } } }
         : {};
 
   const where: Prisma.TicketWhereInput = {
@@ -182,7 +182,11 @@ export default async function TicketsPage({
     take: perPage,
     include: {
       machine: { select: { assetCode: true, name: true } },
-      technician: { select: { name: true } },
+      assignments: {
+        where: { unassignedAt: null },
+        orderBy: { assignedAt: "asc" },
+        select: { technician: { select: { name: true } } },
+      },
     },
   });
 
@@ -274,8 +278,15 @@ export default async function TicketsPage({
                 <TableCell className="hidden text-muted-foreground md:table-cell">
                   {t.machine.assetCode}
                 </TableCell>
-                <TableCell className="hidden text-muted-foreground lg:table-cell">
-                  {t.technician?.name ?? "—"}
+                <TableCell
+                  className="hidden text-muted-foreground lg:table-cell"
+                  title={t.assignments.map((a) => a.technician.name).join(", ") || undefined}
+                >
+                  {t.assignments.length === 0
+                    ? "—"
+                    : t.assignments.length === 1
+                      ? t.assignments[0].technician.name
+                      : `${t.assignments[0].technician.name} +${t.assignments.length - 1}`}
                 </TableCell>
                 <TableCell>
                   <TicketPriorityBadge priority={t.priority} />

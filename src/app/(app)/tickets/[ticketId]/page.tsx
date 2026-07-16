@@ -11,6 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { can } from "@/lib/authz";
 import { requireActiveUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { toTicketContext } from "@/lib/ticket-context";
 
 export async function generateMetadata({
   params,
@@ -38,7 +39,11 @@ export default async function TicketDetailPage({
     include: {
       machine: { select: { id: true, assetCode: true, name: true } },
       requester: { select: { id: true, name: true } },
-      technician: { select: { id: true, name: true } },
+      assignments: {
+        where: { unassignedAt: null },
+        orderBy: { assignedAt: "asc" },
+        include: { technician: { select: { id: true, name: true } } },
+      },
       problemType: { select: { name: true } },
       suggestedSolution: { select: { title: true } },
       statusHistory: {
@@ -53,11 +58,13 @@ export default async function TicketDetailPage({
   });
   if (!ticket) notFound();
 
+  const members = ticket.assignments.map((a) => a.technician);
+  const ctx = toTicketContext(ticket);
+
   // Requesters and technicians only see their own tickets; admin/supervisor/
   // head see everything. `can()` is still the real gate on every action —
   // this just keeps someone from reading a ticket that isn't theirs.
-  const isParticipant =
-    ticket.requesterId === user.id || ticket.assignedTechnicianId === user.id;
+  const isParticipant = ticket.requesterId === user.id || ctx.assigneeIds.includes(user.id);
   const isStaff = user.role === "ADMIN" || user.role === "SUPERVISOR" || user.role === "HEAD";
   if (!isParticipant && !isStaff) notFound();
 
@@ -70,7 +77,7 @@ export default async function TicketDetailPage({
         })
       : [];
 
-  const canComment = can(user, "addRemark", ticket).allowed;
+  const canComment = can(user, "addRemark", ctx).allowed;
 
   return (
     <div className="space-y-6">
@@ -96,7 +103,7 @@ export default async function TicketDetailPage({
         </div>
         <TicketActions
           actor={user}
-          ticket={ticket}
+          ticket={{ ...ctx, id: ticket.id }}
           technicians={technicians}
         />
       </div>
@@ -135,8 +142,10 @@ export default async function TicketDetailPage({
                 <dd>{ticket.requester.name}</dd>
               </div>
               <div className="flex justify-between gap-4">
-                <dt className="text-muted-foreground">Technician</dt>
-                <dd>{ticket.technician?.name ?? "Unassigned"}</dd>
+                <dt className="text-muted-foreground">
+                  {members.length === 1 ? "Technician" : "Technicians"}
+                </dt>
+                <dd>{members.length > 0 ? members.map((m) => m.name).join(", ") : "Unassigned"}</dd>
               </div>
               {ticket.problemType && (
                 <div className="flex justify-between gap-4">

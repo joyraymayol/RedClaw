@@ -48,7 +48,11 @@ export const rejectReviewSchema = z.object({
 
 export const assignSchema = z.object({
   ticketId: z.string().min(1),
-  technicianId: z.string().min(1, "Pick a technician"),
+  technicianIds: z
+    .array(z.string().min(1))
+    .min(1, "Pick at least one technician")
+    .max(10, "Pick at most 10 technicians")
+    .transform((ids) => [...new Set(ids)]),
 });
 
 export const ticketIdSchema = z.object({

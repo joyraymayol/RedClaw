@@ -6,9 +6,11 @@ import { redirect } from "next/navigation";
 import { runAction } from "@/lib/actions/action-helpers";
 import { requireActiveUser } from "@/lib/auth";
 import { assertCan } from "@/lib/authz";
+import { diffAssignees } from "@/lib/assignment-diff";
 import { ConflictError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { nextTicketNumber } from "@/lib/ticket-number";
+import { openAssignmentsInclude, toTicketContext } from "@/lib/ticket-context";
 import { transitionTarget, type TicketTransitionAction } from "@/lib/ticket-state-machine";
 import {
   adminCancelSchema,
@@ -95,6 +97,8 @@ export async function createTicket(
 type TransitionOptions = {
   data?: Prisma.TicketUpdateManyMutationInput;
   note?: string;
+  /** Runs first inside the transaction — e.g. the technician busy-check. */
+  guard?: (tx: Prisma.TransactionClient) => Promise<void>;
 };
 
 async function runTransition(
@@ -104,13 +108,18 @@ async function runTransition(
 ): Promise<Ticket> {
   const user = await requireActiveUser();
 
-  const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
+  const ticket = await prisma.ticket.findUnique({
+    where: { id: ticketId },
+    include: openAssignmentsInclude,
+  });
   if (!ticket) throw new ConflictError("Ticket not found.");
 
-  assertCan(user, action, ticket);
+  assertCan(user, action, toTicketContext(ticket));
   const toStatus = transitionTarget(action);
 
   await prisma.$transaction(async (tx) => {
+    if (options.guard) await options.guard(tx);
+
     const { count } = await tx.ticket.updateMany({
       where: { id: ticketId, status: ticket.status },
       data: { status: toStatus, ...options.data },
@@ -140,6 +149,23 @@ function ticketIdFrom(formData: FormData): string | null {
 
 // ── Technician actions ──────────────────────────────────────────────────
 
+/**
+ * A technician is "busy" if they hold an open membership on another
+ * IN_PROGRESS ticket — teammates' busy-ness never blocks (plan §2): only
+ * the acting technician's own workload is checked, and only app-level (the
+ * old DB partial-unique-index backstop was keyed to the single-assignee
+ * scalar and can't express a flat-team membership rule).
+ */
+async function findBusyTicket(tx: Prisma.TransactionClient, technicianId: string, excludeTicketId: string) {
+  return tx.ticket.findFirst({
+    where: {
+      status: "IN_PROGRESS",
+      id: { not: excludeTicketId },
+      assignments: { some: { technicianId, unassignedAt: null } },
+    },
+  });
+}
+
 export async function startWork(
   _prevState: TicketActionState,
   formData: FormData
@@ -149,20 +175,17 @@ export async function startWork(
     if (!ticketId) return { error: "Missing ticket." };
 
     const user = await requireActiveUser();
-    // Friendlier than waiting for the partial-unique-index violation, which
-    // still stands as the DB-level backstop against a same-instant race.
-    const busy = await prisma.ticket.findFirst({
-      where: { assignedTechnicianId: user.id, status: "IN_PROGRESS" },
-    });
-    if (busy) {
-      return {
-        error: `Finish or hold ${busy.ticketNumber} before starting another ticket.`,
-      };
-    }
-
     const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
     await runTransition(ticketId, "startWork", {
       data: ticket?.startedAt ? {} : { startedAt: new Date() },
+      guard: async (tx) => {
+        const busy = await findBusyTicket(tx, user.id, ticketId);
+        if (busy) {
+          throw new ConflictError(
+            `Finish or hold ${busy.ticketNumber} before starting another ticket.`
+          );
+        }
+      },
     });
     return { success: true };
   });
@@ -197,16 +220,17 @@ export async function resumeTicket(
     if (!ticketId) return { error: "Missing ticket." };
 
     const user = await requireActiveUser();
-    const busy = await prisma.ticket.findFirst({
-      where: { assignedTechnicianId: user.id, status: "IN_PROGRESS" },
+    await runTransition(ticketId, "resumeTicket", {
+      data: { holdReason: null },
+      guard: async (tx) => {
+        const busy = await findBusyTicket(tx, user.id, ticketId);
+        if (busy) {
+          throw new ConflictError(
+            `Finish or hold ${busy.ticketNumber} before resuming another ticket.`
+          );
+        }
+      },
     });
-    if (busy) {
-      return {
-        error: `Finish or hold ${busy.ticketNumber} before resuming another ticket.`,
-      };
-    }
-
-    await runTransition(ticketId, "resumeTicket", { data: { holdReason: null } });
     return { success: true };
   });
 }
@@ -336,13 +360,18 @@ export async function cancelTicket(
 }
 
 // ── Assignment ───────────────────────────────────────────────────────────
+// Flat team of equals — no lead/primary. Current membership is the set of
+// TicketAssignment rows still open (unassignedAt: null); every member gets
+// full work rights (see authz.ts). assignTicket sets the initial team from
+// OPEN/REOPENED; updateAssignees adds/removes members afterward without
+// touching status.
 
-async function loadActiveTechnician(technicianId: string) {
-  const technician = await prisma.user.findUnique({ where: { id: technicianId } });
-  if (!technician || technician.role !== "TECHNICIAN" || technician.status !== "ACTIVE") {
-    return null;
-  }
-  return technician;
+async function loadActiveTechnicians(technicianIds: string[]) {
+  const technicians = await prisma.user.findMany({
+    where: { id: { in: technicianIds }, role: "TECHNICIAN", status: "ACTIVE" },
+  });
+  if (technicians.length !== technicianIds.length) return null;
+  return technicians;
 }
 
 export async function assignTicket(
@@ -353,53 +382,66 @@ export async function assignTicket(
     const admin = await requireActiveUser();
     const parsed = assignSchema.safeParse({
       ticketId: formData.get("ticketId"),
-      technicianId: formData.get("technicianId"),
+      technicianIds: formData.getAll("technicianIds"),
     });
     if (!parsed.success) return { error: parsed.error.issues[0].message };
-    const { ticketId, technicianId } = parsed.data;
+    const { ticketId, technicianIds } = parsed.data;
 
-    const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      include: openAssignmentsInclude,
+    });
     if (!ticket) return { error: "Ticket not found." };
-    assertCan(admin, "assignTicket", ticket);
+    assertCan(admin, "assignTicket", toTicketContext(ticket));
 
-    const technician = await loadActiveTechnician(technicianId);
-    if (!technician) return { error: "Pick an active technician." };
+    const technicians = await loadActiveTechnicians(technicianIds);
+    if (!technicians) return { error: "Pick active technicians only." };
+    const names = technicians.map((t) => t.name).join(", ");
 
-    // Priority interrupt (plan §2): assigning a HIGH/CRITICAL ticket to a
-    // technician who's mid-IN_PROGRESS on something else bumps that ticket
-    // to ON_HOLD and starts this one immediately, instead of queueing behind it.
-    const busyTicket = await prisma.ticket.findFirst({
-      where: { assignedTechnicianId: technicianId, status: "IN_PROGRESS" },
+    // Priority interrupt (plan §2): assigning a HIGH/CRITICAL ticket to
+    // technicians who are mid-IN_PROGRESS on something else bumps those
+    // tickets to ON_HOLD and starts this one immediately, per busy member.
+    const busyTickets = await prisma.ticket.findMany({
+      where: {
+        status: "IN_PROGRESS",
+        assignments: { some: { technicianId: { in: technicianIds }, unassignedAt: null } },
+      },
     });
     const shouldPreempt =
-      !!busyTicket && (ticket.priority === "HIGH" || ticket.priority === "CRITICAL");
+      busyTickets.length > 0 && (ticket.priority === "HIGH" || ticket.priority === "CRITICAL");
 
     await prisma.$transaction(async (tx) => {
-      if (shouldPreempt && busyTicket) {
-        const { count: heldCount } = await tx.ticket.updateMany({
-          where: { id: busyTicket.id, status: "IN_PROGRESS" },
-          data: { status: "ON_HOLD", holdReason: "PREEMPTED_BY_HIGHER_PRIORITY" },
-        });
-        if (heldCount === 0) {
-          throw new ConflictError("The technician's active ticket changed — refresh and retry.");
+      // Close any stale open rows first — normally none, but a REOPENED
+      // ticket's earlier row can otherwise survive uncleared and collide
+      // with the one-open-row-per-member index.
+      await tx.ticketAssignment.updateMany({
+        where: { ticketId, unassignedAt: null },
+        data: { unassignedAt: new Date() },
+      });
+
+      if (shouldPreempt) {
+        for (const busyTicket of busyTickets) {
+          const { count: heldCount } = await tx.ticket.updateMany({
+            where: { id: busyTicket.id, status: "IN_PROGRESS" },
+            data: { status: "ON_HOLD", holdReason: "PREEMPTED_BY_HIGHER_PRIORITY" },
+          });
+          if (heldCount === 0) {
+            throw new ConflictError("A technician's active ticket changed — refresh and retry.");
+          }
+          await tx.ticketStatusHistory.create({
+            data: {
+              ticketId: busyTicket.id,
+              fromStatus: "IN_PROGRESS",
+              toStatus: "ON_HOLD",
+              changedById: admin.id,
+              note: `Preempted by higher-priority ticket ${ticket.ticketNumber}`,
+            },
+          });
         }
-        await tx.ticketStatusHistory.create({
-          data: {
-            ticketId: busyTicket.id,
-            fromStatus: "IN_PROGRESS",
-            toStatus: "ON_HOLD",
-            changedById: admin.id,
-            note: `Preempted by higher-priority ticket ${ticket.ticketNumber}`,
-          },
-        });
 
         const { count } = await tx.ticket.updateMany({
           where: { id: ticketId, status: ticket.status },
-          data: {
-            status: "IN_PROGRESS",
-            assignedTechnicianId: technicianId,
-            startedAt: ticket.startedAt ?? new Date(),
-          },
+          data: { status: "IN_PROGRESS", startedAt: ticket.startedAt ?? new Date() },
         });
         if (count === 0) throw new ConflictError("Ticket changed state — refresh and retry.");
         await tx.ticketStatusHistory.create({
@@ -408,21 +450,21 @@ export async function assignTicket(
             fromStatus: ticket.status,
             toStatus: "IN_PROGRESS",
             changedById: admin.id,
-            note: `Preempts ${busyTicket.ticketNumber}`,
+            note: `Preempts ${busyTickets.map((t) => t.ticketNumber).join(", ")} — assigned to ${names}`,
           },
         });
-        await tx.ticketAssignment.create({
-          data: {
+        await tx.ticketAssignment.createMany({
+          data: technicianIds.map((technicianId) => ({
             ticketId,
             technicianId,
             assignedById: admin.id,
-            reason: "PREEMPTED_BY_HIGHER_PRIORITY",
-          },
+            reason: "PREEMPTED_BY_HIGHER_PRIORITY" as const,
+          })),
         });
       } else {
         const { count } = await tx.ticket.updateMany({
           where: { id: ticketId, status: ticket.status },
-          data: { status: "ASSIGNED", assignedTechnicianId: technicianId },
+          data: { status: "ASSIGNED" },
         });
         if (count === 0) throw new ConflictError("Ticket changed state — refresh and retry.");
         await tx.ticketStatusHistory.create({
@@ -431,15 +473,16 @@ export async function assignTicket(
             fromStatus: ticket.status,
             toStatus: "ASSIGNED",
             changedById: admin.id,
+            note: `Assigned to ${names}`,
           },
         });
-        await tx.ticketAssignment.create({
-          data: {
+        await tx.ticketAssignment.createMany({
+          data: technicianIds.map((technicianId) => ({
             ticketId,
             technicianId,
             assignedById: admin.id,
-            reason: ticket.status === "REOPENED" ? "REOPENED" : "INITIAL_ASSIGN",
-          },
+            reason: ticket.status === "REOPENED" ? ("REOPENED" as const) : ("INITIAL_ASSIGN" as const),
+          })),
         });
       }
     });
@@ -450,7 +493,7 @@ export async function assignTicket(
   });
 }
 
-export async function reassignTicket(
+export async function updateAssignees(
   _prevState: TicketActionState,
   formData: FormData
 ): Promise<TicketActionState> {
@@ -458,43 +501,72 @@ export async function reassignTicket(
     const admin = await requireActiveUser();
     const parsed = assignSchema.safeParse({
       ticketId: formData.get("ticketId"),
-      technicianId: formData.get("technicianId"),
+      technicianIds: formData.getAll("technicianIds"),
     });
     if (!parsed.success) return { error: parsed.error.issues[0].message };
-    const { ticketId, technicianId } = parsed.data;
+    const { ticketId, technicianIds } = parsed.data;
 
-    const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      include: openAssignmentsInclude,
+    });
     if (!ticket) return { error: "Ticket not found." };
-    assertCan(admin, "reassignTicket", ticket);
+    const ctx = toTicketContext(ticket);
+    assertCan(admin, "updateAssignees", ctx);
 
-    if (technicianId === ticket.assignedTechnicianId) {
-      return { error: "Already assigned to that technician." };
+    const { toAdd, toRemove } = diffAssignees(ctx.assigneeIds, technicianIds);
+    if (toAdd.length === 0 && toRemove.length === 0) {
+      return { error: "No membership changes." };
     }
-    const technician = await loadActiveTechnician(technicianId);
-    if (!technician) return { error: "Pick an active technician." };
+
+    const addedTechnicians = toAdd.length ? await loadActiveTechnicians(toAdd) : [];
+    if (!addedTechnicians) return { error: "Pick active technicians only." };
+    const removedTechnicians = toRemove.length
+      ? await prisma.user.findMany({
+          where: { id: { in: toRemove } },
+          select: { id: true, name: true },
+        })
+      : [];
 
     await prisma.$transaction(async (tx) => {
+      // Membership edit, not a status transition — the status itself is
+      // rewritten unchanged just to drive the optimistic concurrency guard.
       const { count } = await tx.ticket.updateMany({
-        where: { id: ticketId, status: "ASSIGNED" },
-        data: { assignedTechnicianId: technicianId },
+        where: { id: ticketId, status: ticket.status },
+        data: { status: ticket.status },
       });
       if (count === 0) throw new ConflictError("Ticket changed state — refresh and retry.");
+
+      if (toRemove.length > 0) {
+        await tx.ticketAssignment.updateMany({
+          where: { ticketId, technicianId: { in: toRemove }, unassignedAt: null },
+          data: { unassignedAt: new Date() },
+        });
+      }
+      if (toAdd.length > 0) {
+        await tx.ticketAssignment.createMany({
+          data: toAdd.map((technicianId) => ({
+            ticketId,
+            technicianId,
+            assignedById: admin.id,
+            reason: "REASSIGNED" as const,
+          })),
+        });
+      }
+
+      const parts = [
+        addedTechnicians.length && `added: ${addedTechnicians.map((t) => t.name).join(", ")}`,
+        removedTechnicians.length && `removed: ${removedTechnicians.map((t) => t.name).join(", ")}`,
+      ].filter(Boolean);
 
       await tx.ticketStatusHistory.create({
         data: {
           ticketId,
-          fromStatus: "ASSIGNED",
-          toStatus: "ASSIGNED",
+          fromStatus: ticket.status,
+          toStatus: ticket.status,
           changedById: admin.id,
-          note: `Reassigned to ${technician.name}`,
+          note: `Team updated — ${parts.join("; ")}`,
         },
-      });
-      await tx.ticketAssignment.updateMany({
-        where: { ticketId, unassignedAt: null },
-        data: { unassignedAt: new Date() },
-      });
-      await tx.ticketAssignment.create({
-        data: { ticketId, technicianId, assignedById: admin.id, reason: "REASSIGNED" },
       });
     });
 
@@ -519,9 +591,12 @@ export async function addRemark(
     if (!parsed.success) return { error: parsed.error.issues[0].message };
     const { ticketId, body } = parsed.data;
 
-    const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      include: openAssignmentsInclude,
+    });
     if (!ticket) return { error: "Ticket not found." };
-    assertCan(user, "addRemark", ticket);
+    assertCan(user, "addRemark", toTicketContext(ticket));
 
     await prisma.ticketRemark.create({
       data: { ticketId, userId: user.id, body, type: "WORK_LOG" },

@@ -45,18 +45,19 @@ export function TicketActions({
         key="assign"
         ticketId={ticket.id}
         technicians={technicians}
-        currentTechnicianId={ticket.assignedTechnicianId}
+        currentAssigneeIds={ticket.assigneeIds}
+        mode="assign"
       />
     );
   }
-  if (can(actor, "reassignTicket", ticket).allowed) {
+  if (can(actor, "updateAssignees", ticket).allowed) {
     buttons.push(
       <TicketAssignDialog
-        key="reassign"
+        key="manage"
         ticketId={ticket.id}
         technicians={technicians}
-        currentTechnicianId={ticket.assignedTechnicianId}
-        isReassign
+        currentAssigneeIds={ticket.assigneeIds}
+        mode="manage"
       />
     );
   }

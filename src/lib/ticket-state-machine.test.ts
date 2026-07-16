@@ -19,7 +19,6 @@ const ALL_ACTIONS = Object.keys(TICKET_TRANSITIONS) as TicketTransitionAction[];
  */
 const EXPECTED: Record<TicketTransitionAction, TicketStatus[]> = {
   assignTicket: [TicketStatus.OPEN, TicketStatus.REOPENED],
-  reassignTicket: [TicketStatus.ASSIGNED],
   startWork: [TicketStatus.ASSIGNED],
   holdTicket: [TicketStatus.IN_PROGRESS],
   resumeTicket: [TicketStatus.ON_HOLD],
@@ -47,7 +46,6 @@ describe("canTransition", () => {
 describe("transitionTarget", () => {
   it.each([
     ["assignTicket", TicketStatus.ASSIGNED],
-    ["reassignTicket", TicketStatus.ASSIGNED],
     ["startWork", TicketStatus.IN_PROGRESS],
     ["holdTicket", TicketStatus.ON_HOLD],
     ["resumeTicket", TicketStatus.IN_PROGRESS],

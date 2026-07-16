@@ -92,7 +92,6 @@ model User {
   updatedAt  DateTime      @updatedAt
 
   ticketsRaised     Ticket[]              @relation("Requester")
-  ticketsAssigned   Ticket[]              @relation("Technician")
   remarks           TicketRemark[]
   statusChanges     TicketStatusHistory[]
   assignmentsGiven  TicketAssignment[]    @relation("AssignedBy")
@@ -191,7 +190,6 @@ model Ticket {
   suggestedSolutionId  String? // picked at creation time, if applicable
   priority             TicketPriority @default(MEDIUM)
   status               TicketStatus   @default(OPEN)
-  assignedTechnicianId String?
   source               TicketSource   @default(MANUAL)
   scheduleId           String? // set if source = PREVENTIVE
   holdReason           HoldReason? // set while ON_HOLD, cleared on resume
@@ -210,7 +208,6 @@ model Ticket {
 
   machine           Machine              @relation(fields: [machineId], references: [id])
   requester         User                 @relation("Requester", fields: [requesterId], references: [id])
-  technician        User?                @relation("Technician", fields: [assignedTechnicianId], references: [id])
   problemType       ProblemType?         @relation(fields: [problemTypeId], references: [id])
   suggestedSolution Solution?            @relation(fields: [suggestedSolutionId], references: [id])
   schedule          MaintenanceSchedule? @relation(fields: [scheduleId], references: [id])
@@ -225,7 +222,6 @@ model Ticket {
   @@index([status])
   @@index([status, priority])
   @@index([machineId])
-  @@index([assignedTechnicianId])
   @@index([createdAt])
 }
 
@@ -245,7 +241,11 @@ model TicketStatusHistory {
   @@index([ticketId])
 }
 
-// Tracks each assign/reassign/halt event separately from status
+// Tracks each assign/reassign/halt event separately from status. Flat team
+// of equals — no lead/primary technician: rows still open (unassignedAt
+// IS NULL) are the sole source of truth for a ticket's current members.
+// One-open-row-per-member is enforced by a hand-written partial unique
+// index (see the flat_team_assignments migration), invisible to Prisma.
 model TicketAssignment {
   id           String           @id @default(uuid())
   ticketId     String

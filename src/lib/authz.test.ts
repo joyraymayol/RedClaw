@@ -20,7 +20,7 @@ function ticket(overrides: Partial<TicketContext> = {}): TicketContext {
   return {
     status: TicketStatus.OPEN,
     requesterId: "requester-1",
-    assignedTechnicianId: null,
+    assigneeIds: [],
     ...overrides,
   };
 }
@@ -93,7 +93,7 @@ describe("requester actions", () => {
   });
 
   it("may not perform technician, admin, or supervisor actions", () => {
-    const assigned = ticket({ status: TicketStatus.ASSIGNED, assignedTechnicianId: "tech-1" });
+    const assigned = ticket({ status: TicketStatus.ASSIGNED, assigneeIds: ["tech-1"] });
     const inReview = ticket({ status: TicketStatus.PENDING_SUPERVISOR_REVIEW });
     expect(can(requester, "startWork", assigned).allowed).toBe(false);
     expect(can(requester, "assignTicket", ticket()).allowed).toBe(false);
@@ -102,7 +102,7 @@ describe("requester actions", () => {
 });
 
 describe("technician actions", () => {
-  const mine = { assignedTechnicianId: technician.id };
+  const mine = { assigneeIds: [technician.id] };
 
   it("may start, hold, resume, and resolve only their own assigned ticket", () => {
     expect(
@@ -123,7 +123,7 @@ describe("technician actions", () => {
   it("is denied on tickets assigned to another technician", () => {
     const someoneElses = ticket({
       status: TicketStatus.ASSIGNED,
-      assignedTechnicianId: "other-tech",
+      assigneeIds: ["other-tech"],
     });
     expect(can(technician, "startWork", someoneElses).allowed).toBe(false);
   });
@@ -151,12 +151,9 @@ describe("technician actions", () => {
 });
 
 describe("admin actions", () => {
-  it("may assign OPEN and REOPENED tickets, and reassign ASSIGNED ones", () => {
+  it("may assign OPEN and REOPENED tickets", () => {
     expect(can(admin, "assignTicket", ticket({ status: TicketStatus.OPEN })).allowed).toBe(true);
     expect(can(admin, "assignTicket", ticket({ status: TicketStatus.REOPENED })).allowed).toBe(
-      true
-    );
-    expect(can(admin, "reassignTicket", ticket({ status: TicketStatus.ASSIGNED })).allowed).toBe(
       true
     );
   });
@@ -184,7 +181,7 @@ describe("admin actions", () => {
   });
 
   it("may not work tickets or perform supervisor QA", () => {
-    const assigned = ticket({ status: TicketStatus.ASSIGNED, assignedTechnicianId: "tech-1" });
+    const assigned = ticket({ status: TicketStatus.ASSIGNED, assigneeIds: ["tech-1"] });
     const inReview = ticket({ status: TicketStatus.PENDING_SUPERVISOR_REVIEW });
     expect(can(admin, "startWork", assigned).allowed).toBe(false);
     expect(can(admin, "closeTicket", inReview).allowed).toBe(false);
@@ -229,8 +226,73 @@ describe("head actions", () => {
   });
 
   it("still cannot work a ticket assigned to someone else", () => {
-    const assigned = ticket({ status: TicketStatus.ASSIGNED, assignedTechnicianId: "tech-1" });
+    const assigned = ticket({ status: TicketStatus.ASSIGNED, assigneeIds: ["tech-1"] });
     expect(can(head, "startWork", assigned).allowed).toBe(false);
+  });
+});
+
+describe("updateAssignees", () => {
+  it("allows admin/head while ASSIGNED, IN_PROGRESS, or ON_HOLD", () => {
+    for (const status of [TicketStatus.ASSIGNED, TicketStatus.IN_PROGRESS, TicketStatus.ON_HOLD]) {
+      expect(can(admin, "updateAssignees", ticket({ status })).allowed).toBe(true);
+      expect(can(head, "updateAssignees", ticket({ status })).allowed).toBe(true);
+    }
+  });
+
+  it("denies in OPEN, REOPENED, PENDING_VERIFICATION, CLOSED, CANCELLED", () => {
+    for (const status of [
+      TicketStatus.OPEN,
+      TicketStatus.REOPENED,
+      TicketStatus.PENDING_VERIFICATION,
+      TicketStatus.CLOSED,
+      TicketStatus.CANCELLED,
+    ]) {
+      expect(can(admin, "updateAssignees", ticket({ status })).allowed).toBe(false);
+    }
+  });
+
+  it("denies technician, supervisor, and requester regardless of status", () => {
+    const t = ticket({ status: TicketStatus.ASSIGNED });
+    expect(can(technician, "updateAssignees", t).allowed).toBe(false);
+    expect(can(supervisor, "updateAssignees", t).allowed).toBe(false);
+    expect(can(requester, "updateAssignees", t).allowed).toBe(false);
+  });
+});
+
+describe("flat team of equals", () => {
+  const team = ticket({ status: TicketStatus.IN_PROGRESS, assigneeIds: ["tech-1", "tech-2"] });
+  const member1 = actor({ id: "tech-1", role: UserRole.TECHNICIAN });
+  const member2 = actor({ id: "tech-2", role: UserRole.TECHNICIAN });
+  const outsider = actor({ id: "tech-3", role: UserRole.TECHNICIAN });
+
+  it("gives every member full work rights — no lead", () => {
+    for (const member of [member1, member2]) {
+      expect(can(member, "startWork", { ...team, status: TicketStatus.ASSIGNED }).allowed).toBe(
+        true
+      );
+      expect(can(member, "holdTicket", team).allowed).toBe(true);
+      expect(can(member, "resumeTicket", { ...team, status: TicketStatus.ON_HOLD }).allowed).toBe(
+        true
+      );
+      expect(can(member, "resolveTicket", team).allowed).toBe(true);
+      expect(can(member, "addRemark", team).allowed).toBe(true);
+      expect(can(member, "logPartUsed", team).allowed).toBe(true);
+    }
+  });
+
+  it("denies a technician who isn't on the team", () => {
+    expect(can(outsider, "startWork", { ...team, status: TicketStatus.ASSIGNED }).allowed).toBe(
+      false
+    );
+    expect(can(outsider, "holdTicket", team).allowed).toBe(false);
+    expect(can(outsider, "resolveTicket", team).allowed).toBe(false);
+    expect(can(outsider, "addRemark", team).allowed).toBe(false);
+    expect(can(outsider, "logPartUsed", team).allowed).toBe(false);
+  });
+
+  it("denies technician work when the team is empty", () => {
+    const unassigned = ticket({ status: TicketStatus.ASSIGNED, assigneeIds: [] });
+    expect(can(member1, "startWork", unassigned).allowed).toBe(false);
   });
 });
 
@@ -240,7 +302,7 @@ describe("addRemark", () => {
     [
       "assigned technician",
       technician,
-      ticket({ status: TicketStatus.IN_PROGRESS, assignedTechnicianId: technician.id }),
+      ticket({ status: TicketStatus.IN_PROGRESS, assigneeIds: [technician.id] }),
     ],
     ["admin on any ticket", admin, ticket({ status: TicketStatus.IN_PROGRESS })],
     ["supervisor on any ticket", supervisor, ticket({ status: TicketStatus.IN_PROGRESS })],
@@ -268,12 +330,12 @@ describe("logPartUsed", () => {
   it("allows only the assigned technician, only while in progress", () => {
     const inProgress = ticket({
       status: TicketStatus.IN_PROGRESS,
-      assignedTechnicianId: technician.id,
+      assigneeIds: [technician.id],
     });
     expect(can(technician, "logPartUsed", inProgress).allowed).toBe(true);
 
     expect(
-      can(technician, "logPartUsed", ticket({ status: TicketStatus.ON_HOLD, assignedTechnicianId: technician.id }))
+      can(technician, "logPartUsed", ticket({ status: TicketStatus.ON_HOLD, assigneeIds: [technician.id] }))
         .allowed
     ).toBe(false);
     expect(can(admin, "logPartUsed", inProgress).allowed).toBe(false);
@@ -294,7 +356,7 @@ describe("full matrix sanity", () => {
   const ALL_ACTIONS: TicketAction[] = [
     "createTicket",
     "assignTicket",
-    "reassignTicket",
+    "updateAssignees",
     "startWork",
     "holdTicket",
     "resumeTicket",
@@ -313,7 +375,7 @@ describe("full matrix sanity", () => {
     for (const status of [TicketStatus.CANCELLED, TicketStatus.CLOSED]) {
       // Give the actor every advantage: HEAD role, requester AND technician of the ticket.
       const superActor = actor({ id: "omni", role: UserRole.HEAD });
-      const t = ticket({ status, requesterId: "omni", assignedTechnicianId: "omni" });
+      const t = ticket({ status, requesterId: "omni", assigneeIds: ["omni"] });
       for (const action of ALL_ACTIONS) {
         if (action === "createTicket") continue; // not ticket-bound
         expect(can(superActor, action, t).allowed, `${action} on ${status}`).toBe(false);

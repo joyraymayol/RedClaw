@@ -15,8 +15,7 @@ import {
  */
 
 export type TicketTransitionAction =
-  | "assignTicket" // admin assigns (OPEN) or routes a reopened ticket back (REOPENED)
-  | "reassignTicket" // admin swaps the technician; status stays ASSIGNED
+  | "assignTicket" // admin assigns a team (OPEN) or routes a reopened ticket back (REOPENED)
   | "startWork" // technician begins (subject to the 1-active-ticket guard)
   | "holdTicket" // technician pauses with a reason, or admin preempts
   | "resumeTicket" // technician picks a held ticket back up (1-active guard again)
@@ -35,7 +34,6 @@ type TransitionRule = {
 
 export const TICKET_TRANSITIONS: Record<TicketTransitionAction, TransitionRule> = {
   assignTicket: { from: [TicketStatus.OPEN, TicketStatus.REOPENED], to: TicketStatus.ASSIGNED },
-  reassignTicket: { from: [TicketStatus.ASSIGNED], to: TicketStatus.ASSIGNED },
   startWork: { from: [TicketStatus.ASSIGNED], to: TicketStatus.IN_PROGRESS },
   holdTicket: { from: [TicketStatus.IN_PROGRESS], to: TicketStatus.ON_HOLD },
   resumeTicket: { from: [TicketStatus.ON_HOLD], to: TicketStatus.IN_PROGRESS },

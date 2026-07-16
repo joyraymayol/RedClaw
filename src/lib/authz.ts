@@ -20,6 +20,7 @@ import {
 export type TicketAction =
   | TicketTransitionAction
   | "createTicket"
+  | "updateAssignees"
   | "addRemark"
   | "logPartUsed";
 
@@ -30,12 +31,20 @@ export type Actor = {
   status: AccountStatus;
 };
 
-/** The slice of `Ticket` authorization decisions run on. */
+/**
+ * The slice of `Ticket` authorization decisions run on. `assigneeIds` is the
+ * flat team of currently-assigned technicians (open TicketAssignment rows) —
+ * there is no lead/primary; every member has full work rights.
+ */
 export type TicketContext = {
   status: TicketStatus;
   requesterId: string;
-  assignedTechnicianId: string | null;
+  assigneeIds: readonly string[];
 };
+
+function isAssignee(ticket: TicketContext, actorId: string): boolean {
+  return ticket.assigneeIds.includes(actorId);
+}
 
 export type Verdict = { allowed: true } | { allowed: false; reason: string };
 
@@ -71,26 +80,41 @@ export function can(actor: Actor, action: TicketAction, ticket?: TicketContext):
         return deny("Ticket is closed or cancelled");
       }
       const isParticipant =
-        ticket.requesterId === actor.id || ticket.assignedTechnicianId === actor.id;
+        ticket.requesterId === actor.id || isAssignee(ticket, actor.id);
       if (isParticipant || hasRole(actor, "ADMIN", "SUPERVISOR", "HEAD")) return allow;
-      return deny("Only the requester, assigned technician, or maintenance staff may comment");
+      return deny("Only the requester, assigned technicians, or maintenance staff may comment");
     }
 
     case "logPartUsed": {
       if (ticket.status !== TicketStatus.IN_PROGRESS) {
         return deny("Parts can only be logged while work is in progress");
       }
-      if (ticket.assignedTechnicianId !== actor.id) {
-        return deny("Only the assigned technician may log parts");
+      if (!isAssignee(ticket, actor.id)) {
+        return deny("Only an assigned technician may log parts");
       }
       return allow;
     }
 
     // ── Admin lifecycle actions ─────────────────────────────────────────
-    case "assignTicket":
-    case "reassignTicket": {
+    case "assignTicket": {
       if (!hasRole(actor, "ADMIN", "HEAD")) return deny("Only admins may assign tickets");
       break;
+    }
+
+    // Membership edit, not a status transition — must return directly so it
+    // never falls through to the transition-map check below, which has no
+    // entry for this action.
+    case "updateAssignees": {
+      if (!hasRole(actor, "ADMIN", "HEAD")) return deny("Only admins may change assignees");
+      const editable: TicketStatus[] = [
+        TicketStatus.ASSIGNED,
+        TicketStatus.IN_PROGRESS,
+        TicketStatus.ON_HOLD,
+      ];
+      if (!editable.includes(ticket.status)) {
+        return deny("Members can only be changed while the ticket is assigned or being worked");
+      }
+      return allow;
     }
 
     case "cancelTicket": {
@@ -105,13 +129,13 @@ export function can(actor: Actor, action: TicketAction, ticket?: TicketContext):
       break;
     }
 
-    // ── Technician actions — always bound to the assigned technician ────
+    // ── Technician actions — any assigned team member, equal rights ─────
     case "startWork":
     case "holdTicket":
     case "resumeTicket":
     case "resolveTicket": {
-      if (ticket.assignedTechnicianId !== actor.id) {
-        return deny("Only the assigned technician may work this ticket");
+      if (!isAssignee(ticket, actor.id)) {
+        return deny("Only an assigned technician may work this ticket");
       }
       break;
     }
