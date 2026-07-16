@@ -45,9 +45,12 @@ export function RemarkThread({
               <div className="flex items-baseline justify-between gap-2">
                 <span className="font-medium">{r.user.name}</span>
                 <span className="text-xs text-muted-foreground">
-                  {r.createdAt.toLocaleString("en-PH", {
+                  {r.createdAt.toLocaleDateString("en-PH", {
                     month: "short",
                     day: "numeric",
+                  })}
+                  {", "}
+                  {r.createdAt.toLocaleTimeString("en-PH", {
                     hour: "numeric",
                     minute: "2-digit",
                   })}
