@@ -1,5 +1,6 @@
 import { AppNav } from "@/components/layout/app-nav";
 import { Logo } from "@/components/logo";
+import { MobileNav } from "@/components/layout/mobile-nav";
 import { SignOutButton } from "@/components/layout/sign-out-button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { getCurrentUser } from "@/lib/auth";
@@ -18,16 +19,19 @@ export default async function AppLayout({
       <header className="border-b">
         <div className="mx-auto flex h-14 w-full max-w-6xl items-center justify-between gap-4 px-6">
           <div className="flex items-center gap-6">
+            {user?.status === "ACTIVE" && <MobileNav role={user.role} userName={user.name} />}
             <Logo />
             {user?.status === "ACTIVE" && <AppNav role={user.role} />}
           </div>
           <div className="flex items-center gap-2">
             {user && (
-              <span className="hidden text-sm text-muted-foreground sm:inline">
+              <span className="hidden text-sm text-muted-foreground lg:inline">
                 {user.name}
               </span>
             )}
-            <SignOutButton />
+            <div className="hidden lg:block">
+              <SignOutButton />
+            </div>
             <ThemeToggle />
           </div>
         </div>
