@@ -7,13 +7,15 @@ import {
   PlusIcon,
 } from "lucide-react";
 
+import { TableSkeleton } from "@/components/skeletons/table-skeleton";
 import { TicketPriorityBadge } from "@/components/tickets/ticket-priority-badge";
 import { TicketStatusBadge } from "@/components/tickets/ticket-status-badge";
-import {
-  TicketsPerPageSelect,
-  TicketsSearch,
-} from "@/components/tickets/tickets-table-controls";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { DebouncedSearchInput } from "@/components/ui/debounced-search-input";
+import { ListNavPending, ListNavProvider } from "@/components/ui/list-nav-context";
+import { PaginationBar } from "@/components/ui/pagination-bar";
+import { PerPageSelect } from "@/components/ui/per-page-select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -42,14 +44,30 @@ const ATTENTION_STATUSES: TicketStatus[] = [
 ];
 const DONE_STATUSES: TicketStatus[] = ["CLOSED", "CANCELLED"];
 
-const FILTERS: { key: string; label: string; where?: Prisma.TicketWhereInput }[] = [
+const FILTERS: {
+  key: string;
+  label: string;
+  where?: Prisma.TicketWhereInput;
+  countStatuses?: TicketStatus[];
+}[] = [
   { key: "all", label: "All" },
-  { key: "open", label: "Open", where: { status: { in: OPEN_STATUSES } } },
-  { key: "active", label: "Active", where: { status: { in: ACTIVE_STATUSES } } },
+  {
+    key: "open",
+    label: "Open",
+    where: { status: { in: OPEN_STATUSES } },
+    countStatuses: OPEN_STATUSES,
+  },
+  {
+    key: "active",
+    label: "Active",
+    where: { status: { in: ACTIVE_STATUSES } },
+    countStatuses: ACTIVE_STATUSES,
+  },
   {
     key: "attention",
     label: "Needs attention",
     where: { status: { in: ATTENTION_STATUSES } },
+    countStatuses: ATTENTION_STATUSES,
   },
   { key: "done", label: "Closed", where: { status: { in: DONE_STATUSES } } },
 ];
@@ -63,20 +81,28 @@ const SORT_COLUMNS: Record<string, (dir: SortDir) => Prisma.TicketOrderByWithRel
   created: (dir) => ({ createdAt: dir }),
 };
 
+// Tickets default to newest-raised-first — a bare "sort"-less URL still
+// carries an explicit column/direction internally so the "Raised" header
+// renders as actively sorted instead of looking unsorted.
+const DEFAULT_SORT = "created";
+const DEFAULT_DIR: SortDir = "desc";
+
 type TableState = {
   filter: string;
+  category: string;
   q: string;
   perPage: number;
-  sort: string | null;
+  sort: string;
   dir: SortDir;
 };
 
 function tableHref(state: TableState, page?: number) {
   const params = new URLSearchParams();
   if (state.filter !== "all") params.set("filter", state.filter);
+  if (state.category) params.set("category", state.category);
   if (state.q) params.set("q", state.q);
   if (state.perPage !== DEFAULT_PER_PAGE) params.set("perPage", String(state.perPage));
-  if (state.sort) {
+  if (state.sort !== DEFAULT_SORT || state.dir !== DEFAULT_DIR) {
     params.set("sort", state.sort);
     if (state.dir === "desc") params.set("dir", "desc");
   }
@@ -124,6 +150,7 @@ export default async function TicketsPage({
 }: {
   searchParams: Promise<{
     filter?: string;
+    category?: string;
     q?: string;
     page?: string;
     perPage?: string;
@@ -135,14 +162,21 @@ export default async function TicketsPage({
   const params = await searchParams;
 
   const filter = FILTERS.find((f) => f.key === params.filter) ?? FILTERS[0];
+  const category = params.category?.trim() ?? "";
   const q = params.q?.trim() ?? "";
   const perPageParam = Number(params.perPage);
   const perPage = (PER_PAGE_OPTIONS as readonly number[]).includes(perPageParam)
     ? perPageParam
     : DEFAULT_PER_PAGE;
-  const sort = params.sort && params.sort in SORT_COLUMNS ? params.sort : null;
-  const dir: SortDir = params.dir === "desc" ? "desc" : "asc";
-  const state: TableState = { filter: filter.key, q, perPage, sort, dir };
+  const sortParam = params.sort && params.sort in SORT_COLUMNS ? params.sort : null;
+  const sort = sortParam ?? DEFAULT_SORT;
+  const dir: SortDir = sortParam ? (params.dir === "desc" ? "desc" : "asc") : DEFAULT_DIR;
+  const state: TableState = { filter: filter.key, category, q, perPage, sort, dir };
+
+  const categories = await prisma.assetCategory.findMany({
+    orderBy: { name: "asc" },
+    select: { id: true, name: true },
+  });
 
   // Requesters see their own tickets; technicians see what's assigned to
   // them; admins/supervisors/head see everything (plan §1 — the page just
@@ -154,41 +188,65 @@ export default async function TicketsPage({
         ? { assignments: { some: { technicianId: user.id, unassignedAt: null } } }
         : {};
 
-  const where: Prisma.TicketWhereInput = {
+  const scopedWhere: Prisma.TicketWhereInput = {
     ...scope,
-    ...filter.where,
+    ...(category && { assets: { some: { unflaggedAt: null, asset: { categoryId: category } } } }),
     ...(q && {
       OR: [
         { ticketNumber: { contains: q, mode: "insensitive" } },
         { title: { contains: q, mode: "insensitive" } },
-        { asset: { assetCode: { contains: q, mode: "insensitive" } } },
-        { asset: { name: { contains: q, mode: "insensitive" } } },
+        {
+          assets: {
+            some: {
+              unflaggedAt: null,
+              asset: {
+                OR: [
+                  { assetCode: { contains: q, mode: "insensitive" } },
+                  { name: { contains: q, mode: "insensitive" } },
+                ],
+              },
+            },
+          },
+        },
       ],
     }),
   };
+
+  const where: Prisma.TicketWhereInput = { ...scopedWhere, ...filter.where };
 
   const total = await prisma.ticket.count({ where });
   const totalPages = Math.max(1, Math.ceil(total / perPage));
   const pageParam = Math.floor(Number(params.page));
   const page = Math.min(Math.max(pageParam || 1, 1), totalPages);
 
-  const tickets = await prisma.ticket.findMany({
-    where,
-    orderBy: [
-      ...(sort ? [SORT_COLUMNS[sort](dir)] : [{ createdAt: "desc" as const }]),
-      { id: "asc" },
-    ],
-    skip: (page - 1) * perPage,
-    take: perPage,
-    include: {
-      asset: { select: { assetCode: true, name: true } },
-      assignments: {
-        where: { unassignedAt: null },
-        orderBy: { assignedAt: "asc" },
-        select: { technician: { select: { name: true } } },
+  const [tickets, statusCounts] = await Promise.all([
+    prisma.ticket.findMany({
+      where,
+      orderBy: [
+        SORT_COLUMNS[sort](dir),
+        { id: "asc" },
+      ],
+      skip: (page - 1) * perPage,
+      take: perPage,
+      include: {
+        assets: {
+          where: { unflaggedAt: null },
+          orderBy: { flaggedAt: "asc" },
+          select: { asset: { select: { assetCode: true } } },
+        },
+        assignments: {
+          where: { unassignedAt: null },
+          orderBy: { assignedAt: "asc" },
+          select: { technician: { select: { name: true } } },
+        },
       },
-    },
-  });
+    }),
+    prisma.ticket.groupBy({ by: ["status"], where: scopedWhere, _count: { _all: true } }),
+  ]);
+
+  const countByStatus = new Map(statusCounts.map((s) => [s.status, s._count._all]));
+  const sumStatuses = (statuses: TicketStatus[]) =>
+    statuses.reduce((sum, s) => sum + (countByStatus.get(s) ?? 0), 0);
 
   const rangeStart = total === 0 ? 0 : (page - 1) * perPage + 1;
   const rangeEnd = Math.min(page * perPage, total);
@@ -212,136 +270,185 @@ export default async function TicketsPage({
         </Button>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <ListNavProvider className="space-y-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-1">
+            {FILTERS.map((f) => {
+              const active = f.key === filter.key;
+              const count = f.countStatuses ? sumStatuses(f.countStatuses) : undefined;
+              return (
+                <Link
+                  key={f.key}
+                  href={tableHref({ ...state, filter: f.key })}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition-colors",
+                    active
+                      ? "bg-muted font-medium text-foreground"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {f.label}
+                  {count !== undefined && (
+                    <span
+                      className={cn(
+                        "rounded-full px-1.5 py-0.5 text-xs tabular-nums",
+                        active ? "bg-background" : "bg-muted-foreground/10"
+                      )}
+                    >
+                      {count}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+          </div>
+          <DebouncedSearchInput
+            placeholder="Search ticket #, title, asset…"
+            ariaLabel="Search tickets"
+            resetParams={["page"]}
+          />
+        </div>
+
         <div className="flex flex-wrap items-center gap-1">
-          {FILTERS.map((f) => (
+          <Link
+            href={tableHref({ ...state, category: "" })}
+            className={cn(
+              "rounded-md px-2.5 py-1.5 text-sm transition-colors",
+              !category
+                ? "bg-muted font-medium text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            All categories
+          </Link>
+          {categories.map((c) => (
             <Link
-              key={f.key}
-              href={tableHref({ ...state, filter: f.key })}
+              key={c.id}
+              href={tableHref({ ...state, category: c.id })}
               className={cn(
                 "rounded-md px-2.5 py-1.5 text-sm transition-colors",
-                f.key === filter.key
+                category === c.id
                   ? "bg-muted font-medium text-foreground"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
-              {f.label}
+              {c.name}
             </Link>
           ))}
         </div>
-        <TicketsSearch />
-      </div>
 
-      <div className="overflow-x-auto rounded-lg border">
-        <Table className="[&_td]:px-4 [&_td]:py-3 [&_th]:px-4">
-          <TableHeader>
-            <TableRow>
-              <SortableHead column="ticketNumber" state={state}>
-                Ticket
-              </SortableHead>
-              <TableHead>Title</TableHead>
-              <TableHead className="hidden md:table-cell">Asset</TableHead>
-              <TableHead className="hidden lg:table-cell">Technician</TableHead>
-              <SortableHead column="priority" state={state}>
-                Priority
-              </SortableHead>
-              <SortableHead column="status" state={state}>
-                Status
-              </SortableHead>
-              <SortableHead column="created" state={state} className="hidden md:table-cell">
-                Raised
-              </SortableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {tickets.length === 0 && (
-              <TableRow>
-                <TableCell
-                  colSpan={7}
-                  className="py-10 text-center text-sm text-muted-foreground"
-                >
-                  {q ? `No tickets match "${q}".` : "No tickets match this filter."}
-                </TableCell>
-              </TableRow>
-            )}
-            {tickets.map((t) => (
-              <TableRow key={t.id}>
-                <TableCell>
-                  <Link
-                    href={`/tickets/${t.id}`}
-                    className={cn(buttonVariants({ variant: "outline", size: "xs" }), "font-mono")}
-                  >
-                    {t.ticketNumber}
-                  </Link>
-                </TableCell>
-                <TableCell className="max-w-64 truncate">{t.title}</TableCell>
-                <TableCell className="hidden text-muted-foreground md:table-cell">
-                  {t.asset.assetCode}
-                </TableCell>
-                <TableCell
-                  className="hidden text-muted-foreground lg:table-cell"
-                  title={t.assignments.map((a) => a.technician.name).join(", ") || undefined}
-                >
-                  {t.assignments.length === 0
-                    ? "—"
-                    : t.assignments.length === 1
-                      ? t.assignments[0].technician.name
-                      : `${t.assignments[0].technician.name} +${t.assignments.length - 1}`}
-                </TableCell>
-                <TableCell>
-                  <TicketPriorityBadge priority={t.priority} />
-                </TableCell>
-                <TableCell>
-                  <TicketStatusBadge status={t.status} />
-                </TableCell>
-                <TableCell className="hidden text-xs text-muted-foreground md:table-cell">
-                  {t.createdAt.toLocaleDateString("en-PH", {
-                    year: "numeric",
-                    month: "short",
-                    day: "numeric",
-                  })}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+        <ListNavPending
+          fallback={
+            <div className="space-y-6">
+              <TableSkeleton columns={7} rows={Math.min(perPage, 8)} />
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-8 w-56" />
+              </div>
+            </div>
+          }
+        >
+          <div className="space-y-6">
+            <div className="overflow-x-auto rounded-lg border">
+              <Table className="[&_td]:px-4 [&_td]:py-3 [&_th]:px-4">
+                <TableHeader>
+                  <TableRow>
+                    <SortableHead column="ticketNumber" state={state}>
+                      Ticket
+                    </SortableHead>
+                    <TableHead>Title</TableHead>
+                    <TableHead className="hidden md:table-cell">Asset</TableHead>
+                    <TableHead className="hidden lg:table-cell">Technician</TableHead>
+                    <SortableHead column="priority" state={state}>
+                      Priority
+                    </SortableHead>
+                    <SortableHead column="status" state={state}>
+                      Status
+                    </SortableHead>
+                    <SortableHead column="created" state={state} className="hidden md:table-cell">
+                      Raised
+                    </SortableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {tickets.length === 0 && (
+                    <TableRow>
+                      <TableCell
+                        colSpan={7}
+                        className="py-10 text-center text-sm text-muted-foreground"
+                      >
+                        {q ? `No tickets match "${q}".` : "No tickets match this filter."}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {tickets.map((t) => (
+                    <TableRow key={t.id}>
+                      <TableCell>
+                        <Link
+                          href={`/tickets/${t.id}`}
+                          className={cn(
+                            buttonVariants({ variant: "outline", size: "xs" }),
+                            "font-mono"
+                          )}
+                        >
+                          {t.ticketNumber}
+                        </Link>
+                      </TableCell>
+                      <TableCell className="max-w-64 truncate">{t.title}</TableCell>
+                      <TableCell
+                        className="hidden text-muted-foreground md:table-cell"
+                        title={t.assets.map((a) => a.asset.assetCode).join(", ") || undefined}
+                      >
+                        {t.assets.length === 0
+                          ? "—"
+                          : t.assets.length === 1
+                            ? t.assets[0].asset.assetCode
+                            : `${t.assets[0].asset.assetCode} +${t.assets.length - 1}`}
+                      </TableCell>
+                      <TableCell
+                        className="hidden text-muted-foreground lg:table-cell"
+                        title={t.assignments.map((a) => a.technician.name).join(", ") || undefined}
+                      >
+                        {t.assignments.length === 0
+                          ? "—"
+                          : t.assignments.length === 1
+                            ? t.assignments[0].technician.name
+                            : `${t.assignments[0].technician.name} +${t.assignments.length - 1}`}
+                      </TableCell>
+                      <TableCell>
+                        <TicketPriorityBadge priority={t.priority} />
+                      </TableCell>
+                      <TableCell>
+                        <TicketStatusBadge status={t.status} />
+                      </TableCell>
+                      <TableCell className="hidden text-xs text-muted-foreground md:table-cell">
+                        {t.createdAt.toLocaleDateString("en-PH", {
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          {total === 0
-            ? "0 tickets"
-            : `Showing ${rangeStart}–${rangeEnd} of ${total} ticket${total === 1 ? "" : "s"}`}
-        </p>
-        <div className="flex flex-wrap items-center gap-4">
-          <TicketsPerPageSelect />
-          <div className="flex items-center gap-1 text-sm">
-            {page > 1 ? (
-              <Link
-                href={tableHref(state, page - 1)}
-                className="rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:text-foreground"
-              >
-                Previous
-              </Link>
-            ) : (
-              <span className="px-2.5 py-1.5 text-muted-foreground/40">Previous</span>
-            )}
-            <span className="px-1 text-muted-foreground">
-              Page {page} of {totalPages}
-            </span>
-            {page < totalPages ? (
-              <Link
-                href={tableHref(state, page + 1)}
-                className="rounded-md px-2.5 py-1.5 text-muted-foreground transition-colors hover:text-foreground"
-              >
-                Next
-              </Link>
-            ) : (
-              <span className="px-2.5 py-1.5 text-muted-foreground/40">Next</span>
-            )}
+            <PaginationBar
+              total={total}
+              page={page}
+              totalPages={totalPages}
+              rangeStart={rangeStart}
+              rangeEnd={rangeEnd}
+              itemLabel="ticket"
+              hrefFor={(p) => tableHref(state, p)}
+              perPageSelect={
+                <PerPageSelect options={PER_PAGE_OPTIONS} defaultValue={DEFAULT_PER_PAGE} />
+              }
+            />
           </div>
-        </div>
-      </div>
+        </ListNavPending>
+      </ListNavProvider>
     </div>
   );
 }

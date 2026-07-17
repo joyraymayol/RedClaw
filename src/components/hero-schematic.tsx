@@ -39,7 +39,7 @@ export function HeroSchematic() {
     <svg
       viewBox="0 0 560 420"
       role="img"
-      aria-label="Animated maintenance schematic: meshing gears being serviced with a wrench, a live machine-vitals trace, and a work order progressing through its ticket lifecycle"
+      aria-label="Animated maintenance schematic: meshing gears being serviced with a wrench, a live asset-vitals trace, and a work order progressing through its ticket lifecycle"
       className="rc-schematic h-auto w-full rounded-lg"
     >
       <defs>
@@ -139,7 +139,7 @@ export function HeroSchematic() {
         </g>
       </g>
 
-      {/* machine vitals trace */}
+      {/* asset vitals trace */}
       <path
         d={VITALS_TRACE}
         pathLength={600}

@@ -37,7 +37,11 @@ export default async function TicketDetailPage({
   const ticket = await prisma.ticket.findUnique({
     where: { id: ticketId },
     include: {
-      asset: { select: { id: true, assetCode: true, name: true } },
+      assets: {
+        where: { unflaggedAt: null },
+        orderBy: { flaggedAt: "asc" },
+        select: { asset: { select: { id: true, assetCode: true, name: true } } },
+      },
       requester: { select: { id: true, name: true } },
       assignments: {
         where: { unassignedAt: null },
@@ -59,6 +63,7 @@ export default async function TicketDetailPage({
   if (!ticket) notFound();
 
   const members = ticket.assignments.map((a) => a.technician);
+  const flaggedAssets = ticket.assets.map((a) => a.asset);
   const ctx = toTicketContext(ticket);
 
   // Requesters and technicians only see their own tickets; admin/supervisor/
@@ -76,6 +81,27 @@ export default async function TicketDetailPage({
           select: { id: true, name: true },
         })
       : [];
+
+  // Asset options for the re-flag dialog: loaded for ADMIN/HEAD and assignees
+  // (the same actors `can(actor, "reflagAssets", ...)` allows) — everyone
+  // else gets an empty list, matching how `technicians` is scoped above.
+  const canReflag =
+    user.role === "ADMIN" || user.role === "HEAD" || ctx.assigneeIds.includes(user.id);
+  const assetOptions = canReflag
+    ? (
+        await prisma.asset.findMany({
+          where: { status: { not: "RETIRED" } },
+          orderBy: { assetCode: "asc" },
+          select: { id: true, assetCode: true, name: true, categoryId: true, category: { select: { name: true } } },
+        })
+      ).map((a) => ({
+        id: a.id,
+        assetCode: a.assetCode,
+        name: a.name,
+        categoryId: a.categoryId,
+        categoryName: a.category.name,
+      }))
+    : [];
 
   const canComment = can(user, "addRemark", ctx).allowed;
 
@@ -105,6 +131,8 @@ export default async function TicketDetailPage({
           actor={user}
           ticket={{ ...ctx, id: ticket.id }}
           technicians={technicians}
+          assetOptions={assetOptions}
+          currentAssetIds={flaggedAssets.map((a) => a.id)}
         />
       </div>
 
@@ -130,11 +158,18 @@ export default async function TicketDetailPage({
             <h2 className="text-sm font-medium text-muted-foreground">Details</h2>
             <dl className="space-y-2">
               <div className="flex justify-between gap-4">
-                <dt className="text-muted-foreground">Asset</dt>
-                <dd>
-                  <Link href={`/assets/${ticket.asset.id}`} className="hover:underline">
-                    {ticket.asset.assetCode}
-                  </Link>
+                <dt className="text-muted-foreground">
+                  {flaggedAssets.length === 1 ? "Asset" : "Assets"}
+                </dt>
+                <dd className="text-right">
+                  {flaggedAssets.map((a, i) => (
+                    <span key={a.id}>
+                      {i > 0 && ", "}
+                      <Link href={`/assets/${a.id}`} className="hover:underline">
+                        {a.assetCode}
+                      </Link>
+                    </span>
+                  ))}
                 </dd>
               </div>
               <div className="flex justify-between gap-4">

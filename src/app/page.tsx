@@ -25,7 +25,7 @@ const features = [
   {
     icon: CalendarClock,
     title: "Preventive maintenance",
-    body: "Time- and usage-based schedules generate tickets automatically, before the machine decides for you.",
+    body: "Time- and usage-based schedules generate tickets automatically, before the asset decides for you.",
   },
   {
     icon: Activity,
@@ -102,7 +102,7 @@ export default function LandingPage() {
                 SYSTEMS ONLINE · BUILT FOR THE PLANT FLOOR
               </p>
               <h1 className="mt-8 text-5xl font-semibold tracking-tight text-balance sm:text-6xl lg:text-7xl">
-                Every machine. Every ticket.{" "}
+                Every asset. Every ticket.{" "}
                 <span className="text-primary">Under control.</span>
               </h1>
               <p className="mt-7 max-w-2xl text-lg text-muted-foreground sm:text-xl">

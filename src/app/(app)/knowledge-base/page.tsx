@@ -2,30 +2,89 @@ import type { Metadata } from "next";
 
 import { ProblemTypeFormDialog } from "@/components/knowledge-base/problem-type-form-dialog";
 import { SolutionFormDialog } from "@/components/knowledge-base/solution-form-dialog";
+import { DebouncedSearchInput } from "@/components/ui/debounced-search-input";
+import { PaginationBar } from "@/components/ui/pagination-bar";
+import { PerPageSelect } from "@/components/ui/per-page-select";
+import type { Prisma } from "@/generated/prisma/client";
+import { DEFAULT_PER_PAGE, PER_PAGE_OPTIONS } from "@/lib/constants/pagination";
 import { requireActiveUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export const metadata: Metadata = { title: "Knowledge base" };
 
-export default async function KnowledgeBasePage() {
+function kbHref(params: { q?: string; perPage?: number }, page?: number) {
+  const search = new URLSearchParams();
+  if (params.q) search.set("q", params.q);
+  if (params.perPage && params.perPage !== DEFAULT_PER_PAGE) {
+    search.set("perPage", String(params.perPage));
+  }
+  if (page && page > 1) search.set("page", String(page));
+  const query = search.toString();
+  return query ? `/knowledge-base?${query}` : "/knowledge-base";
+}
+
+export default async function KnowledgeBasePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ q?: string; page?: string; perPage?: string }>;
+}) {
   const user = await requireActiveUser();
   const canManage = user.role === "ADMIN" || user.role === "HEAD";
+  const { q: qParam, page: pageParam, perPage: perPageParamRaw } = await searchParams;
+  const q = qParam?.trim() ?? "";
+  const perPageParam = Number(perPageParamRaw);
+  const perPage = (PER_PAGE_OPTIONS as readonly number[]).includes(perPageParam)
+    ? perPageParam
+    : DEFAULT_PER_PAGE;
 
-  const [problemTypes, assets] = await Promise.all([
-    prisma.problemType.findMany({
-      orderBy: { name: "asc" },
-      include: {
-        solutions: {
-          orderBy: { createdAt: "desc" },
-          include: { asset: { select: { assetCode: true, name: true } } },
-        },
-      },
-    }),
+  const where: Prisma.ProblemTypeWhereInput = q
+    ? {
+        OR: [
+          { name: { contains: q, mode: "insensitive" } },
+          { category: { contains: q, mode: "insensitive" } },
+          { description: { contains: q, mode: "insensitive" } },
+          {
+            solutions: {
+              some: {
+                OR: [
+                  { title: { contains: q, mode: "insensitive" } },
+                  { description: { contains: q, mode: "insensitive" } },
+                  { asset: { assetCode: { contains: q, mode: "insensitive" } } },
+                  { asset: { name: { contains: q, mode: "insensitive" } } },
+                ],
+              },
+            },
+          },
+        ],
+      }
+    : {};
+
+  const [assets, total] = await Promise.all([
     prisma.asset.findMany({
       orderBy: { assetCode: "asc" },
       select: { id: true, assetCode: true, name: true },
     }),
+    prisma.problemType.count({ where }),
   ]);
+  const totalPages = Math.max(1, Math.ceil(total / perPage));
+  const pageNumberParam = Math.floor(Number(pageParam));
+  const page = Math.min(Math.max(pageNumberParam || 1, 1), totalPages);
+
+  const problemTypes = await prisma.problemType.findMany({
+    where,
+    orderBy: { name: "asc" },
+    skip: (page - 1) * perPage,
+    take: perPage,
+    include: {
+      solutions: {
+        orderBy: { createdAt: "desc" },
+        include: { asset: { select: { assetCode: true, name: true } } },
+      },
+    },
+  });
+
+  const rangeStart = total === 0 ? 0 : (page - 1) * perPage + 1;
+  const rangeEnd = Math.min(page * perPage, total);
 
   return (
     <div className="space-y-6">
@@ -42,9 +101,16 @@ export default async function KnowledgeBasePage() {
         {canManage && <ProblemTypeFormDialog />}
       </div>
 
+      <DebouncedSearchInput
+        placeholder="Search problem types, solutions, assets…"
+        ariaLabel="Search knowledge base"
+        resetParams={["page"]}
+        className="sm:max-w-sm"
+      />
+
       {problemTypes.length === 0 && (
         <p className="rounded-lg border py-10 text-center text-sm text-muted-foreground">
-          No problem types yet.
+          {q ? `No problem types match "${q}".` : "No problem types yet."}
         </p>
       )}
 
@@ -109,6 +175,21 @@ export default async function KnowledgeBasePage() {
           </div>
         ))}
       </div>
+
+      {total > 0 && (
+        <PaginationBar
+          total={total}
+          page={page}
+          totalPages={totalPages}
+          rangeStart={rangeStart}
+          rangeEnd={rangeEnd}
+          itemLabel="problem type"
+          hrefFor={(p) => kbHref({ q, perPage }, p)}
+          perPageSelect={
+            <PerPageSelect options={PER_PAGE_OPTIONS} defaultValue={DEFAULT_PER_PAGE} />
+          }
+        />
+      )}
     </div>
   );
 }

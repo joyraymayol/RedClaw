@@ -21,6 +21,7 @@ export type TicketAction =
   | TicketTransitionAction
   | "createTicket"
   | "updateAssignees"
+  | "reflagAssets"
   | "addRemark"
   | "logPartUsed";
 
@@ -113,6 +114,20 @@ export function can(actor: Actor, action: TicketAction, ticket?: TicketContext):
       ];
       if (!editable.includes(ticket.status)) {
         return deny("Members can only be changed while the ticket is assigned or being worked");
+      }
+      return allow;
+    }
+
+    // Non-transition action, like updateAssignees — must return directly so
+    // it never falls through to the transition-map check below, which has
+    // no entry for this action.
+    case "reflagAssets": {
+      const eligible = hasRole(actor, "ADMIN", "HEAD") || isAssignee(ticket, actor.id);
+      if (!eligible) {
+        return deny("Only admins, head, or an assigned technician may re-flag assets");
+      }
+      if (isTerminalStatus(ticket.status)) {
+        return deny("Ticket is closed or cancelled");
       }
       return allow;
     }

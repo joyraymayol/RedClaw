@@ -1,5 +1,5 @@
-/** Pure set-diff between a ticket's current and desired technician membership. */
-export function diffAssignees(
+/** Pure set-diff between a current and desired id membership (ticket assignees, ticket asset flags, product capabilities). */
+export function diffIds(
   currentIds: readonly string[],
   desiredIds: readonly string[]
 ): { toAdd: string[]; toRemove: string[] } {

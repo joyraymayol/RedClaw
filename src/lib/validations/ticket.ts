@@ -58,3 +58,12 @@ export const assignSchema = z.object({
 export const ticketIdSchema = z.object({
   ticketId: z.string().min(1),
 });
+
+export const flagAssetsSchema = z.object({
+  ticketId: z.string().min(1),
+  assetIds: z
+    .array(z.string().min(1))
+    .min(1, "Pick at least one asset")
+    .max(10, "Pick at most 10 assets")
+    .transform((ids) => [...new Set(ids)]),
+});

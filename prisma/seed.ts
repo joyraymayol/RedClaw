@@ -58,6 +58,28 @@ const ASSET_CATEGORIES = [
   { name: "Fleet", tracksProducts: false, supportsParentAsset: false },
 ] as const;
 
+// A realistic type catalog per category — available as dropdown options
+// once assets exist, independent of the ad-hoc types the 5 demo assets
+// below already carry from Phase 1's free-text backfill (CNC, Injection,
+// Conveyor, Compressor, Extrusion).
+const ASSET_TYPES = [
+  { category: "Production Machines", name: "PET Stretch Blow" },
+  { category: "Production Machines", name: "Blow Molding" },
+  { category: "Production Machines", name: "Injection Molding" },
+  { category: "Machine Accessories", name: "Chiller" },
+  { category: "Machine Accessories", name: "Air Compressor" },
+  { category: "Machine Accessories", name: "Mold Temp Controller" },
+  { category: "Facilities", name: "Lighting" },
+  { category: "Facilities", name: "Airconditioning" },
+  { category: "Facilities", name: "Electrical" },
+  { category: "Facilities", name: "Building" },
+  { category: "Fleet", name: "Delivery Truck" },
+  { category: "Fleet", name: "Forklift" },
+  { category: "Fleet", name: "Heavy Equipment" },
+] as const;
+
+const PRODUCTS = ["PET Small Bottle", "PET 2L Bottle"] as const;
+
 const ASSETS = [
   { assetCode: "CNC-014", name: "CNC Mill #3", category: "Production Machines", type: "CNC", location: "Bay 3" },
   { assetCode: "INJ-002", name: "Injection Molder #2", category: "Production Machines", type: "Injection", location: "Bay 1" },
@@ -105,6 +127,21 @@ async function seedStarterData() {
     });
     typeIds.set(a.type, type.id);
   }
+  for (const t of ASSET_TYPES) {
+    if (typeIds.has(t.name)) continue;
+    const categoryId = categoryIds.get(t.category)!;
+    await prisma.assetType.upsert({
+      where: { categoryId_name: { categoryId, name: t.name } },
+      update: {},
+      create: { name: t.name, categoryId },
+    });
+  }
+  console.log(`✓ ${ASSET_TYPES.length} asset types ensured`);
+
+  for (const name of PRODUCTS) {
+    await prisma.product.upsert({ where: { name }, update: {}, create: { name } });
+  }
+  console.log(`✓ ${PRODUCTS.length} products ensured`);
 
   for (const a of ASSETS) {
     await prisma.asset.upsert({

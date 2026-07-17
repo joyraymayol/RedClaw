@@ -63,7 +63,7 @@ export function LoginForm({ initialError }: { initialError?: string }) {
               name="email"
               type="email"
               autoComplete="email"
-              placeholder="you@gmail.com"
+              placeholder="you@plaspack.ph"
               required
             />
           </div>

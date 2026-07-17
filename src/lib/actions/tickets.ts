@@ -6,16 +6,21 @@ import { redirect } from "next/navigation";
 import { runAction } from "@/lib/actions/action-helpers";
 import { requireActiveUser } from "@/lib/auth";
 import { assertCan } from "@/lib/authz";
-import { diffAssignees } from "@/lib/assignment-diff";
+import { diffIds } from "@/lib/id-diff";
 import { ConflictError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { nextTicketNumber } from "@/lib/ticket-number";
-import { openAssignmentsInclude, toTicketContext } from "@/lib/ticket-context";
+import {
+  openAssetFlagsInclude,
+  openAssignmentsInclude,
+  toTicketContext,
+} from "@/lib/ticket-context";
 import { transitionTarget, type TicketTransitionAction } from "@/lib/ticket-state-machine";
 import {
   adminCancelSchema,
   assignSchema,
   cancelSchema,
+  flagAssetsSchema,
   holdSchema,
   newTicketSchema,
   reopenSchema,
@@ -51,7 +56,15 @@ export async function createTicket(
       description: formData.get("description"),
     });
     if (!parsed.success) return { error: parsed.error.issues[0].message };
-    const { priority, ...rest } = parsed.data;
+    const { priority, assetId, ...rest } = parsed.data;
+
+    const asset = await prisma.asset.findUnique({
+      where: { id: assetId },
+      select: { status: true },
+    });
+    if (!asset || asset.status === "RETIRED") {
+      return { error: "Selected asset is retired or no longer exists." };
+    }
 
     const ticketId = await prisma.$transaction(async (tx) => {
       const slaPolicy = await tx.slaPolicy.findUnique({ where: { priority } });
@@ -70,6 +83,10 @@ export async function createTicket(
           ackDueAt,
           resolveDueAt,
         },
+      });
+
+      await tx.ticketAsset.create({
+        data: { ticketId: ticket.id, assetId, flaggedById: user.id },
       });
 
       await tx.ticketStatusHistory.create({
@@ -514,7 +531,7 @@ export async function updateAssignees(
     const ctx = toTicketContext(ticket);
     assertCan(admin, "updateAssignees", ctx);
 
-    const { toAdd, toRemove } = diffAssignees(ctx.assigneeIds, technicianIds);
+    const { toAdd, toRemove } = diffIds(ctx.assigneeIds, technicianIds);
     if (toAdd.length === 0 && toRemove.length === 0) {
       return { error: "No membership changes." };
     }
@@ -566,6 +583,92 @@ export async function updateAssignees(
           toStatus: ticket.status,
           changedById: admin.id,
           note: `Team updated — ${parts.join("; ")}`,
+        },
+      });
+    });
+
+    revalidatePath("/tickets");
+    revalidatePath(`/tickets/${ticketId}`);
+    return { success: true };
+  });
+}
+
+// ── Asset flags ──────────────────────────────────────────────────────────
+// A ticket is created against exactly one asset; afterward ADMIN/HEAD or an
+// assigned technician can re-flag it to one or more (mirrors updateAssignees'
+// flat-membership pattern, but for TicketAsset instead of TicketAssignment).
+
+export async function updateTicketAssets(
+  _prevState: TicketActionState,
+  formData: FormData
+): Promise<TicketActionState> {
+  return runAction(async () => {
+    const user = await requireActiveUser();
+    const parsed = flagAssetsSchema.safeParse({
+      ticketId: formData.get("ticketId"),
+      assetIds: formData.getAll("assetIds"),
+    });
+    if (!parsed.success) return { error: parsed.error.issues[0].message };
+    const { ticketId, assetIds } = parsed.data;
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      include: { ...openAssignmentsInclude, ...openAssetFlagsInclude },
+    });
+    if (!ticket) return { error: "Ticket not found." };
+    const ctx = toTicketContext(ticket);
+    assertCan(user, "reflagAssets", ctx);
+
+    const currentAssetIds = ticket.assets.map((a) => a.assetId);
+    const { toAdd, toRemove } = diffIds(currentAssetIds, assetIds);
+    if (toAdd.length === 0 && toRemove.length === 0) {
+      return { error: "No asset changes." };
+    }
+
+    const addedAssets = toAdd.length
+      ? await prisma.asset.findMany({
+          where: { id: { in: toAdd }, status: { not: "RETIRED" } },
+          select: { id: true, assetCode: true },
+        })
+      : [];
+    if (addedAssets.length !== toAdd.length) {
+      return { error: "Pick non-retired assets only." };
+    }
+
+    await prisma.$transaction(async (tx) => {
+      // Asset flag edit, not a status transition — the status itself is
+      // rewritten unchanged just to drive the optimistic concurrency guard.
+      const { count } = await tx.ticket.updateMany({
+        where: { id: ticketId, status: ticket.status },
+        data: { status: ticket.status },
+      });
+      if (count === 0) throw new ConflictError("Ticket changed state — refresh and retry.");
+
+      if (toRemove.length > 0) {
+        await tx.ticketAsset.updateMany({
+          where: { ticketId, assetId: { in: toRemove }, unflaggedAt: null },
+          data: { unflaggedAt: new Date() },
+        });
+      }
+      if (toAdd.length > 0) {
+        await tx.ticketAsset.createMany({
+          data: toAdd.map((assetId) => ({ ticketId, assetId, flaggedById: user.id })),
+        });
+      }
+
+      const removedSet = new Set(toRemove);
+      const retainedCodes = ticket.assets
+        .filter((a) => !removedSet.has(a.assetId))
+        .map((a) => a.asset.assetCode);
+      const codes = [...retainedCodes, ...addedAssets.map((a) => a.assetCode)].sort();
+
+      await tx.ticketStatusHistory.create({
+        data: {
+          ticketId,
+          fromStatus: ticket.status,
+          toStatus: ticket.status,
+          changedById: user.id,
+          note: `Re-flagged to ${codes.join(", ")}`,
         },
       });
     });

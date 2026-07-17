@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AssetFormDialog } from "@/components/assets/asset-form-dialog";
+import { AssetProductsCard } from "@/components/assets/asset-products-card";
 import { AssetQrBlock } from "@/components/assets/asset-qr-block";
 import { AssetRetireButton } from "@/components/assets/asset-retire-button";
 import { AssetStatusBadge } from "@/components/assets/asset-status-badge";
@@ -51,30 +52,49 @@ export default async function AssetDetailPage({
   const asset = await prisma.asset.findUnique({
     where: { id: assetId },
     include: {
-      category: { select: { name: true } },
+      category: { select: { name: true, tracksProducts: true } },
       type: { select: { name: true } },
       parentAsset: { select: { id: true, assetCode: true, name: true } },
       childAssets: {
         orderBy: { assetCode: "asc" },
         select: { id: true, assetCode: true, name: true, status: true },
       },
-      tickets: {
-        orderBy: { createdAt: "desc" },
-        take: 50,
+      currentProduct: { select: { id: true, name: true } },
+      productCapabilities: {
+        orderBy: { addedAt: "asc" },
+        select: { product: { select: { id: true, name: true } } },
+      },
+      productChanges: {
+        orderBy: { changedAt: "desc" },
+        take: 20,
         select: {
           id: true,
-          ticketNumber: true,
-          title: true,
-          status: true,
-          priority: true,
-          createdAt: true,
+          changedAt: true,
+          product: { select: { name: true } },
+          changedBy: { select: { name: true } },
         },
       },
     },
   });
   if (!asset) notFound();
 
-  const [categories, types, allAssets] = canManage
+  // Ever-flagged, not just currently-flagged — a past flag (since removed
+  // by a re-flag) is still part of this asset's maintenance history.
+  const tickets = await prisma.ticket.findMany({
+    where: { assets: { some: { assetId } } },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+    select: {
+      id: true,
+      ticketNumber: true,
+      title: true,
+      status: true,
+      priority: true,
+      createdAt: true,
+    },
+  });
+
+  const [categories, types, allAssets, allProducts] = canManage
     ? await Promise.all([
         prisma.assetCategory.findMany({
           orderBy: { name: "asc" },
@@ -88,8 +108,12 @@ export default async function AssetDetailPage({
           orderBy: { assetCode: "asc" },
           select: { id: true, assetCode: true, name: true, categoryId: true, status: true },
         }),
+        prisma.product.findMany({
+          orderBy: { name: "asc" },
+          select: { id: true, name: true },
+        }),
       ])
-    : [[], [], []];
+    : [[], [], [], []];
 
   return (
     <div className="space-y-6">
@@ -170,6 +194,24 @@ export default async function AssetDetailPage({
         <AssetQrBlock assetId={asset.id} />
       </div>
 
+      {asset.category.tracksProducts && (
+        <AssetProductsCard
+          assetId={asset.id}
+          retired={asset.status === "RETIRED"}
+          canManage={canManage}
+          allProducts={allProducts}
+          capabilities={asset.productCapabilities.map((c) => c.product)}
+          currentProductId={asset.currentProduct?.id ?? null}
+          currentProductName={asset.currentProduct?.name ?? null}
+          changeLogs={asset.productChanges.map((log) => ({
+            id: log.id,
+            productName: log.product?.name ?? null,
+            changedByName: log.changedBy.name,
+            changedAt: log.changedAt,
+          }))}
+        />
+      )}
+
       {asset.childAssets.length > 0 && (
         <div className="space-y-2">
           <h2 className="text-sm font-medium text-muted-foreground">Children</h2>
@@ -203,7 +245,7 @@ export default async function AssetDetailPage({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {asset.tickets.length === 0 && (
+              {tickets.length === 0 && (
                 <TableRow>
                   <TableCell
                     colSpan={5}
@@ -213,7 +255,7 @@ export default async function AssetDetailPage({
                   </TableCell>
                 </TableRow>
               )}
-              {asset.tickets.map((t) => (
+              {tickets.map((t) => (
                 <TableRow key={t.id}>
                   <TableCell>
                     <Link

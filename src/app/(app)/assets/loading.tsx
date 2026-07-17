@@ -15,6 +15,11 @@ export default function AssetsLoading() {
       <Skeleton className="h-9 w-full sm:max-w-xs" />
 
       <TableSkeleton columns={6} />
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-8 w-48" />
+      </div>
     </div>
   );
 }

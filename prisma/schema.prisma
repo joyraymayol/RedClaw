@@ -101,8 +101,55 @@ model User {
   partsLogged       TicketPart[]
   downtimeLogged    DowntimeLog[]
   usageReadings     AssetUsageLog[]
+  productChanges    ProductChangeLog[]
+  assetFlagsGiven   TicketAsset[]
 
   @@index([status])
+}
+
+// Products an asset is capable of running (Production Machines only, via
+// AssetCategory.tracksProducts). CRUD `Product` catalog is shared across
+// assets; `AssetProduct` is the per-asset capability list.
+model Product {
+  id          String   @id @default(uuid())
+  name        String   @unique // e.g. "PET Small Bottle", "PET 2L Bottle"
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  capabilities    AssetProduct[]
+  currentOnAssets Asset[]            @relation("CurrentProduct")
+  changeLogs      ProductChangeLog[]
+}
+
+// An asset's capability list — which products it *can* run, independent
+// of which one it's currently set to (Asset.currentProductId).
+model AssetProduct {
+  id        String   @id @default(uuid())
+  assetId   String
+  productId String
+  addedAt   DateTime @default(now())
+
+  asset   Asset   @relation(fields: [assetId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  @@unique([assetId, productId])
+}
+
+// Append-only changeover history — one row per Asset.currentProductId
+// switch (productId null = cleared to no current product).
+model ProductChangeLog {
+  id          String   @id @default(uuid())
+  assetId     String
+  productId   String?
+  changedById String
+  changedAt   DateTime @default(now())
+
+  asset     Asset    @relation(fields: [assetId], references: [id])
+  product   Product? @relation(fields: [productId], references: [id])
+  changedBy User     @relation(fields: [changedById], references: [id])
+
+  @@index([assetId, changedAt])
 }
 
 model AssetCategory {
@@ -146,24 +193,29 @@ model Asset {
   warrantyExpiresAt DateTime?
   retiredAt         DateTime?
   parentAssetId     String?
+  currentProductId  String?
   notes             String?
   createdAt         DateTime   @default(now())
   updatedAt         DateTime   @updatedAt
 
-  category    AssetCategory @relation(fields: [categoryId], references: [id])
-  type        AssetType?    @relation(fields: [typeId], references: [id])
-  parentAsset Asset?        @relation("AssetParent", fields: [parentAssetId], references: [id])
-  childAssets Asset[]       @relation("AssetParent")
+  category       AssetCategory @relation(fields: [categoryId], references: [id])
+  type           AssetType?    @relation(fields: [typeId], references: [id])
+  parentAsset    Asset?        @relation("AssetParent", fields: [parentAssetId], references: [id])
+  childAssets    Asset[]       @relation("AssetParent")
+  currentProduct Product?      @relation("CurrentProduct", fields: [currentProductId], references: [id])
 
-  tickets      Ticket[]
-  solutions    Solution[]
-  schedules    MaintenanceSchedule[]
-  downtimeLogs DowntimeLog[]
-  usageLogs    AssetUsageLog[]
+  ticketFlags         TicketAsset[]
+  solutions           Solution[]
+  schedules           MaintenanceSchedule[]
+  downtimeLogs        DowntimeLog[]
+  usageLogs           AssetUsageLog[]
+  productCapabilities AssetProduct[]
+  productChanges      ProductChangeLog[]
 
   @@index([categoryId])
   @@index([status])
   @@index([parentAssetId])
+  @@index([currentProductId])
 }
 
 // Cumulative operating-hours readings — the data source for USAGE-based PM
@@ -227,7 +279,6 @@ model Ticket {
   ticketNumber         String         @unique // e.g. "TKT-2026-0341" — sequence-backed, formatted at insert time
   title                String
   description          String
-  assetId              String
   requesterId          String
   problemTypeId        String?
   suggestedSolutionId  String? // picked at creation time, if applicable
@@ -249,7 +300,6 @@ model Ticket {
   closedAt     DateTime? // supervisor closed
   cancelledAt  DateTime?
 
-  asset             Asset                @relation(fields: [assetId], references: [id])
   requester         User                 @relation("Requester", fields: [requesterId], references: [id])
   problemType       ProblemType?         @relation(fields: [problemTypeId], references: [id])
   suggestedSolution Solution?            @relation(fields: [suggestedSolutionId], references: [id])
@@ -259,12 +309,12 @@ model Ticket {
   attachments   TicketAttachment[]
   statusHistory TicketStatusHistory[]
   assignments   TicketAssignment[]
+  assets        TicketAsset[]
   partsUsed     TicketPart[]
   downtimeLogs  DowntimeLog[]
 
   @@index([status])
   @@index([status, priority])
-  @@index([assetId])
   @@index([createdAt])
 }
 
@@ -304,6 +354,28 @@ model TicketAssignment {
 
   @@index([ticketId])
   @@index([technicianId])
+}
+
+// Which asset(s) a ticket is raised against. Mirrors TicketAssignment's flat
+// pattern: rows still open (unflaggedAt IS NULL) are the sole source of
+// truth for a ticket's current asset flags — a ticket is created against
+// exactly one asset, then ADMIN/HEAD or an assigned technician can re-flag
+// it to one or more. One-open-row-per-asset is enforced by a hand-written
+// partial unique index (see the ticket_assets migration), invisible to Prisma.
+model TicketAsset {
+  id          String    @id @default(uuid())
+  ticketId    String
+  assetId     String
+  flaggedById String
+  flaggedAt   DateTime  @default(now())
+  unflaggedAt DateTime?
+
+  ticket    Ticket @relation(fields: [ticketId], references: [id])
+  asset     Asset  @relation(fields: [assetId], references: [id])
+  flaggedBy User   @relation(fields: [flaggedById], references: [id])
+
+  @@index([ticketId])
+  @@index([assetId])
 }
 
 model TicketRemark {

@@ -3,9 +3,11 @@ import Link from "next/link";
 import { SettingsIcon } from "lucide-react";
 
 import { AssetFormDialog } from "@/components/assets/asset-form-dialog";
-import { AssetsSearch } from "@/components/assets/assets-search";
 import { AssetStatusBadge } from "@/components/assets/asset-status-badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { DebouncedSearchInput } from "@/components/ui/debounced-search-input";
+import { PaginationBar } from "@/components/ui/pagination-bar";
+import { PerPageSelect } from "@/components/ui/per-page-select";
 import {
   Table,
   TableBody,
@@ -15,16 +17,21 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { Prisma } from "@/generated/prisma/client";
+import { PER_PAGE_OPTIONS, DEFAULT_PER_PAGE } from "@/lib/constants/pagination";
 import { requireActiveUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Assets" };
 
-function assetsHref(params: { q?: string; category?: string }) {
+function assetsHref(params: { q?: string; category?: string; perPage?: number }, page?: number) {
   const search = new URLSearchParams();
   if (params.q) search.set("q", params.q);
   if (params.category) search.set("category", params.category);
+  if (params.perPage && params.perPage !== DEFAULT_PER_PAGE) {
+    search.set("perPage", String(params.perPage));
+  }
+  if (page && page > 1) search.set("page", String(page));
   const query = search.toString();
   return query ? `/assets?${query}` : "/assets";
 }
@@ -32,13 +39,18 @@ function assetsHref(params: { q?: string; category?: string }) {
 export default async function AssetsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string; category?: string }>;
+  searchParams: Promise<{ q?: string; category?: string; page?: string; perPage?: string }>;
 }) {
   const user = await requireActiveUser();
   const canManage = user.role === "ADMIN" || user.role === "HEAD";
-  const { q: qParam, category: categoryParam } = await searchParams;
+  const { q: qParam, category: categoryParam, page: pageParam, perPage: perPageParamRaw } =
+    await searchParams;
   const q = qParam?.trim() ?? "";
   const category = categoryParam?.trim() ?? "";
+  const perPageParam = Number(perPageParamRaw);
+  const perPage = (PER_PAGE_OPTIONS as readonly number[]).includes(perPageParam)
+    ? perPageParam
+    : DEFAULT_PER_PAGE;
 
   const [categories, types, allAssets] = await Promise.all([
     prisma.assetCategory.findMany({
@@ -70,11 +82,21 @@ export default async function AssetsPage({
     }),
   };
 
+  const total = await prisma.asset.count({ where });
+  const totalPages = Math.max(1, Math.ceil(total / perPage));
+  const pageNumberParam = Math.floor(Number(pageParam));
+  const page = Math.min(Math.max(pageNumberParam || 1, 1), totalPages);
+
   const assets = await prisma.asset.findMany({
     where,
     orderBy: { assetCode: "asc" },
     include: { category: { select: { name: true } } },
+    skip: (page - 1) * perPage,
+    take: perPage,
   });
+
+  const rangeStart = total === 0 ? 0 : (page - 1) * perPage + 1;
+  const rangeEnd = Math.min(page * perPage, total);
 
   return (
     <div className="space-y-6">
@@ -105,7 +127,7 @@ export default async function AssetsPage({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-1">
           <Link
-            href={assetsHref({ q })}
+            href={assetsHref({ q, perPage })}
             className={cn(
               "rounded-md px-2.5 py-1.5 text-sm transition-colors",
               !category
@@ -118,7 +140,7 @@ export default async function AssetsPage({
           {categories.map((c) => (
             <Link
               key={c.id}
-              href={assetsHref({ q, category: c.id })}
+              href={assetsHref({ q, category: c.id, perPage })}
               className={cn(
                 "rounded-md px-2.5 py-1.5 text-sm transition-colors",
                 category === c.id
@@ -130,7 +152,11 @@ export default async function AssetsPage({
             </Link>
           ))}
         </div>
-        <AssetsSearch />
+        <DebouncedSearchInput
+          placeholder="Search asset code, name, category…"
+          ariaLabel="Search assets"
+          resetParams={["page"]}
+        />
       </div>
 
       <div className="overflow-x-auto rounded-lg border">
@@ -191,6 +217,19 @@ export default async function AssetsPage({
           </TableBody>
         </Table>
       </div>
+
+      <PaginationBar
+        total={total}
+        page={page}
+        totalPages={totalPages}
+        rangeStart={rangeStart}
+        rangeEnd={rangeEnd}
+        itemLabel="asset"
+        hrefFor={(p) => assetsHref({ q, category, perPage }, p)}
+        perPageSelect={
+          <PerPageSelect options={PER_PAGE_OPTIONS} defaultValue={DEFAULT_PER_PAGE} />
+        }
+      />
     </div>
   );
 }

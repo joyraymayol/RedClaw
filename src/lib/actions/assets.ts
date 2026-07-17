@@ -2,10 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 
+import { diffIds } from "@/lib/id-diff";
 import { requireRole } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { isUniqueConstraintError } from "@/lib/prisma-errors";
 import { assetSchema } from "@/lib/validations/asset";
+import { productCapabilitiesSchema, setCurrentProductSchema } from "@/lib/validations/product";
 
 export type AssetActionState = {
   error?: string;
@@ -119,6 +121,100 @@ export async function unretireAsset(assetId: string): Promise<AssetActionState> 
   if (count === 0) return { error: "Asset not found or not retired." };
 
   revalidatePath("/assets");
+  revalidatePath(`/assets/${assetId}`);
+  return { success: true };
+}
+
+export async function updateProductCapabilities(
+  _prevState: AssetActionState,
+  formData: FormData
+): Promise<AssetActionState> {
+  await requireRole("ADMIN", "HEAD");
+
+  const parsed = productCapabilitiesSchema.safeParse({
+    assetId: formData.get("assetId"),
+    productIds: formData.getAll("productIds"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  const { assetId, productIds } = parsed.data;
+
+  const asset = await prisma.asset.findUnique({
+    where: { id: assetId },
+    include: { productCapabilities: true },
+  });
+  if (!asset) return { error: "Asset not found." };
+
+  const { toAdd, toRemove } = diffIds(
+    asset.productCapabilities.map((c) => c.productId),
+    productIds
+  );
+  if (toAdd.length === 0 && toRemove.length === 0) {
+    return { error: "No capability changes." };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    if (toRemove.length > 0) {
+      await tx.assetProduct.deleteMany({
+        where: { assetId, productId: { in: toRemove } },
+      });
+    }
+    if (toAdd.length > 0) {
+      await tx.assetProduct.createMany({
+        data: toAdd.map((productId) => ({ assetId, productId })),
+      });
+    }
+    // Removing the current product's capability also clears the current
+    // product — it's no longer something this asset can be set to.
+    if (asset.currentProductId && toRemove.includes(asset.currentProductId)) {
+      await tx.asset.update({ where: { id: assetId }, data: { currentProductId: null } });
+    }
+  });
+
+  revalidatePath(`/assets/${assetId}`);
+  return { success: true };
+}
+
+export async function setCurrentProduct(
+  _prevState: AssetActionState,
+  formData: FormData
+): Promise<AssetActionState> {
+  const user = await requireRole("ADMIN", "HEAD");
+
+  const parsed = setCurrentProductSchema.safeParse({
+    assetId: formData.get("assetId"),
+    productId: formData.get("productId"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  const { assetId, productId } = parsed.data;
+
+  const asset = await prisma.asset.findUnique({
+    where: { id: assetId },
+    include: {
+      category: { select: { tracksProducts: true } },
+      productCapabilities: true,
+    },
+  });
+  if (!asset) return { error: "Asset not found." };
+  if (!asset.category.tracksProducts) {
+    return { error: "This asset's category doesn't track products." };
+  }
+  if (asset.status === "RETIRED") {
+    return { error: "Retired assets can't have a product changeover." };
+  }
+  if (productId && !asset.productCapabilities.some((c) => c.productId === productId)) {
+    return { error: "Choose a product this asset is capable of running." };
+  }
+  if (productId === asset.currentProductId) {
+    return { error: "Already set to that product." };
+  }
+
+  await prisma.$transaction([
+    prisma.asset.update({ where: { id: assetId }, data: { currentProductId: productId } }),
+    prisma.productChangeLog.create({
+      data: { assetId, productId, changedById: user.id },
+    }),
+  ]);
+
   revalidatePath(`/assets/${assetId}`);
   return { success: true };
 }

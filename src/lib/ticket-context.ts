@@ -13,6 +13,21 @@ export const openAssignmentsInclude = {
   },
 } satisfies Prisma.TicketInclude;
 
+/**
+ * A ticket's *current* asset flags — the TicketAsset rows still open
+ * (`unflaggedAt: null`) — not a scalar column. Mirrors `openAssignmentsInclude`.
+ */
+export const openAssetFlagsInclude = {
+  assets: {
+    where: { unflaggedAt: null },
+    orderBy: { flaggedAt: "asc" },
+    select: {
+      assetId: true,
+      asset: { select: { id: true, assetCode: true, name: true, categoryId: true } },
+    },
+  },
+} satisfies Prisma.TicketInclude;
+
 type TicketWithOpenAssignments = {
   status: TicketContext["status"];
   requesterId: string;

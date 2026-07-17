@@ -11,6 +11,7 @@ import {
 
 import { SimpleActionButton } from "@/components/tickets/simple-action-button";
 import { TicketAssignDialog } from "@/components/tickets/ticket-assign-dialog";
+import { TicketFlagDialog } from "@/components/tickets/ticket-flag-dialog";
 import { TicketHoldDialog } from "@/components/tickets/ticket-hold-dialog";
 import { TicketNoteDialog } from "@/components/tickets/ticket-note-dialog";
 import { can, type Actor, type TicketContext } from "@/lib/authz";
@@ -27,15 +28,20 @@ import {
 } from "@/lib/actions/tickets";
 
 type TechnicianOption = { id: string; name: string };
+type AssetOption = { id: string; assetCode: string; name: string; categoryId: string; categoryName: string };
 
 export function TicketActions({
   actor,
   ticket,
   technicians,
+  assetOptions,
+  currentAssetIds,
 }: {
   actor: Actor;
   ticket: TicketContext & { id: string };
   technicians: TechnicianOption[];
+  assetOptions: AssetOption[];
+  currentAssetIds: readonly string[];
 }) {
   const buttons: React.ReactNode[] = [];
 
@@ -58,6 +64,16 @@ export function TicketActions({
         technicians={technicians}
         currentAssigneeIds={ticket.assigneeIds}
         mode="manage"
+      />
+    );
+  }
+  if (can(actor, "reflagAssets", ticket).allowed) {
+    buttons.push(
+      <TicketFlagDialog
+        key="reflag"
+        ticketId={ticket.id}
+        assets={assetOptions}
+        currentAssetIds={currentAssetIds}
       />
     );
   }

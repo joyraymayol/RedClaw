@@ -16,10 +16,15 @@ export const metadata: Metadata = { title: "Raise a ticket" };
 export default async function NewTicketPage() {
   await requireActiveUser();
 
-  const [assets, problemTypes, solutions] = await Promise.all([
+  const [categories, assets, problemTypes, solutions] = await Promise.all([
+    prisma.assetCategory.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
     prisma.asset.findMany({
+      where: { status: { not: "RETIRED" } },
       orderBy: { assetCode: "asc" },
-      select: { id: true, assetCode: true, name: true },
+      select: { id: true, assetCode: true, name: true, categoryId: true },
     }),
     prisma.problemType.findMany({
       orderBy: { name: "asc" },
@@ -47,6 +52,7 @@ export default async function NewTicketPage() {
         </CardHeader>
         <CardContent>
           <TicketForm
+            categories={categories}
             assets={assets}
             problemTypes={problemTypes}
             solutions={solutions}

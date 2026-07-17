@@ -259,6 +259,34 @@ describe("updateAssignees", () => {
   });
 });
 
+describe("reflagAssets", () => {
+  it("allows admin/head regardless of assignment", () => {
+    const unassigned = ticket({ status: TicketStatus.ASSIGNED, assigneeIds: [] });
+    expect(can(admin, "reflagAssets", unassigned).allowed).toBe(true);
+    expect(can(head, "reflagAssets", unassigned).allowed).toBe(true);
+  });
+
+  it("allows an assigned technician", () => {
+    const t = ticket({ status: TicketStatus.IN_PROGRESS, assigneeIds: [technician.id] });
+    expect(can(technician, "reflagAssets", t).allowed).toBe(true);
+  });
+
+  it("denies an unassigned technician, supervisor, and the requester", () => {
+    const t = ticket({ status: TicketStatus.IN_PROGRESS, assigneeIds: ["other-tech"] });
+    expect(can(technician, "reflagAssets", t).allowed).toBe(false);
+    expect(can(supervisor, "reflagAssets", t).allowed).toBe(false);
+    expect(can(requester, "reflagAssets", t).allowed).toBe(false);
+  });
+
+  it("denies everyone once the ticket is closed or cancelled, even admin/assignee", () => {
+    for (const status of [TicketStatus.CLOSED, TicketStatus.CANCELLED]) {
+      const t = ticket({ status, assigneeIds: [technician.id] });
+      expect(can(admin, "reflagAssets", t).allowed).toBe(false);
+      expect(can(technician, "reflagAssets", t).allowed).toBe(false);
+    }
+  });
+});
+
 describe("flat team of equals", () => {
   const team = ticket({ status: TicketStatus.IN_PROGRESS, assigneeIds: ["tech-1", "tech-2"] });
   const member1 = actor({ id: "tech-1", role: UserRole.TECHNICIAN });
@@ -357,6 +385,7 @@ describe("full matrix sanity", () => {
     "createTicket",
     "assignTicket",
     "updateAssignees",
+    "reflagAssets",
     "startWork",
     "holdTicket",
     "resumeTicket",
