@@ -11,17 +11,17 @@ export default async function KnowledgeBasePage() {
   const user = await requireActiveUser();
   const canManage = user.role === "ADMIN" || user.role === "HEAD";
 
-  const [problemTypes, machines] = await Promise.all([
+  const [problemTypes, assets] = await Promise.all([
     prisma.problemType.findMany({
       orderBy: { name: "asc" },
       include: {
         solutions: {
           orderBy: { createdAt: "desc" },
-          include: { machine: { select: { assetCode: true, name: true } } },
+          include: { asset: { select: { assetCode: true, name: true } } },
         },
       },
     }),
-    prisma.machine.findMany({
+    prisma.asset.findMany({
       orderBy: { assetCode: "asc" },
       select: { id: true, assetCode: true, name: true },
     }),
@@ -69,7 +69,7 @@ export default async function KnowledgeBasePage() {
               </div>
               {canManage && (
                 <div className="flex items-center gap-1">
-                  <SolutionFormDialog problemTypeId={pt.id} machines={machines} />
+                  <SolutionFormDialog problemTypeId={pt.id} assets={assets} />
                   <ProblemTypeFormDialog problemType={pt} />
                 </div>
               )}
@@ -85,9 +85,9 @@ export default async function KnowledgeBasePage() {
                     <div>
                       <div className="flex items-center gap-2 text-sm font-medium">
                         {s.title}
-                        {s.machine && (
+                        {s.asset && (
                           <span className="font-mono text-[10px] text-muted-foreground">
-                            {s.machine.assetCode}
+                            {s.asset.assetCode}
                           </span>
                         )}
                       </div>
@@ -98,7 +98,7 @@ export default async function KnowledgeBasePage() {
                     {canManage && (
                       <SolutionFormDialog
                         problemTypeId={pt.id}
-                        machines={machines}
+                        assets={assets}
                         solution={s}
                       />
                     )}

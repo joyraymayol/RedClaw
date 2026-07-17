@@ -161,8 +161,8 @@ export default async function TicketsPage({
       OR: [
         { ticketNumber: { contains: q, mode: "insensitive" } },
         { title: { contains: q, mode: "insensitive" } },
-        { machine: { assetCode: { contains: q, mode: "insensitive" } } },
-        { machine: { name: { contains: q, mode: "insensitive" } } },
+        { asset: { assetCode: { contains: q, mode: "insensitive" } } },
+        { asset: { name: { contains: q, mode: "insensitive" } } },
       ],
     }),
   };
@@ -181,7 +181,7 @@ export default async function TicketsPage({
     skip: (page - 1) * perPage,
     take: perPage,
     include: {
-      machine: { select: { assetCode: true, name: true } },
+      asset: { select: { assetCode: true, name: true } },
       assignments: {
         where: { unassignedAt: null },
         orderBy: { assignedAt: "asc" },
@@ -240,7 +240,7 @@ export default async function TicketsPage({
                 Ticket
               </SortableHead>
               <TableHead>Title</TableHead>
-              <TableHead className="hidden md:table-cell">Machine</TableHead>
+              <TableHead className="hidden md:table-cell">Asset</TableHead>
               <TableHead className="hidden lg:table-cell">Technician</TableHead>
               <SortableHead column="priority" state={state}>
                 Priority
@@ -276,7 +276,7 @@ export default async function TicketsPage({
                 </TableCell>
                 <TableCell className="max-w-64 truncate">{t.title}</TableCell>
                 <TableCell className="hidden text-muted-foreground md:table-cell">
-                  {t.machine.assetCode}
+                  {t.asset.assetCode}
                 </TableCell>
                 <TableCell
                   className="hidden text-muted-foreground lg:table-cell"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -22,42 +22,38 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
 import {
-  createSolution,
-  deleteSolution,
-  updateSolution,
-  type SolutionActionState,
-} from "@/lib/actions/solutions";
-import type { Solution } from "@/generated/prisma/client";
+  createAssetType,
+  deleteAssetType,
+  updateAssetType,
+  type AssetTypeActionState,
+} from "@/lib/actions/asset-types";
+import type { AssetType } from "@/generated/prisma/client";
 
-type AssetOption = { id: string; assetCode: string; name: string };
+type CategoryOption = { id: string; name: string };
 
-export function SolutionFormDialog({
-  problemTypeId,
-  assets,
-  solution,
+export function AssetTypeFormDialog({
+  type,
+  categories,
 }: {
-  problemTypeId: string;
-  assets: AssetOption[];
-  solution?: Solution;
+  type?: AssetType;
+  categories: CategoryOption[];
 }) {
-  const isEdit = !!solution;
+  const isEdit = !!type;
   const [open, setOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const action = isEdit ? updateSolution : createSolution;
-  // base-ui's <Select.Value> needs an explicit items map to show a label
-  // instead of the raw id once the popup (which registers labels) closes.
-  const assetItems = {
-    __general__: "Any asset (general)",
-    ...Object.fromEntries(assets.map((a) => [a.id, `${a.assetCode} — ${a.name}`])),
-  };
+  const action = isEdit ? updateAssetType : createAssetType;
+
+  const categoryItems = useMemo(
+    () => Object.fromEntries(categories.map((c) => [c.id, c.name])),
+    [categories]
+  );
 
   function submit(formData: FormData) {
     startTransition(async () => {
-      const result: SolutionActionState = await action({}, formData);
+      const result: AssetTypeActionState = await action({}, formData);
       if (result.success) {
         setOpen(false);
         setError(null);
@@ -68,9 +64,9 @@ export function SolutionFormDialog({
   }
 
   function handleDelete() {
-    if (!solution) return;
+    if (!type) return;
     startTransition(async () => {
-      const result = await deleteSolution(solution.id);
+      const result = await deleteAssetType(type.id);
       if (result.success) {
         setOpen(false);
         setError(null);
@@ -95,27 +91,27 @@ export function SolutionFormDialog({
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={`Edit ${solution.title}`}
+          aria-label={`Edit ${type.name}`}
           onClick={() => setOpen(true)}
         >
           <PencilIcon className="size-4" />
         </Button>
       ) : (
-        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-          <PlusIcon className="size-3.5" />
-          Add solution
+        <Button onClick={() => setOpen(true)} disabled={categories.length === 0}>
+          <PlusIcon className="size-4" />
+          Add type
         </Button>
       )}
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="sm:max-w-md">
-          {confirmingDelete && solution ? (
+          {confirmingDelete && type ? (
             <>
               <DialogHeader>
-                <DialogTitle>Delete &quot;{solution.title}&quot;?</DialogTitle>
+                <DialogTitle>Delete &quot;{type.name}&quot;?</DialogTitle>
                 <DialogDescription>
-                  This can&apos;t be undone. If a ticket still references it
-                  as its suggested solution, deletion will be blocked.
+                  This can&apos;t be undone. If any assets still reference it,
+                  deletion will be blocked.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -135,58 +131,45 @@ export function SolutionFormDialog({
           ) : (
             <>
               <DialogHeader>
-                <DialogTitle>{isEdit ? "Edit solution" : "Add solution"}</DialogTitle>
+                <DialogTitle>{isEdit ? "Edit asset type" : "Add asset type"}</DialogTitle>
                 <DialogDescription>
-                  A curated fix requesters and technicians see when raising or
-                  working a ticket of this problem type.
+                  Types are an optional, category-scoped lookup for assets
+                  (e.g. PET Stretch Blow, Chiller, Forklift).
                 </DialogDescription>
               </DialogHeader>
 
               {/* suppressHydrationWarning: Chrome iOS injects __gcruniqueid into forms */}
               <form action={submit} className="space-y-4" suppressHydrationWarning>
-                <input type="hidden" name="problemTypeId" value={problemTypeId} />
-                {isEdit && <input type="hidden" name="solutionId" value={solution.id} />}
+                {isEdit && <input type="hidden" name="typeId" value={type.id} />}
                 <div className="space-y-2">
-                  <Label htmlFor="title">Title</Label>
+                  <Label htmlFor="name">Name</Label>
                   <Input
-                    id="title"
-                    name="title"
-                    defaultValue={solution?.title}
-                    placeholder="Replace worn drive belt"
+                    id="name"
+                    name="name"
+                    defaultValue={type?.name}
+                    placeholder="Chiller"
                     required
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="assetId">Applies to</Label>
+                  <Label htmlFor="categoryId">Category</Label>
                   <Select
-                    name="assetId"
-                    items={assetItems}
-                    defaultValue={solution?.assetId ?? "__general__"}
+                    name="categoryId"
+                    items={categoryItems}
+                    defaultValue={type?.categoryId}
+                    required
                   >
-                    <SelectTrigger id="assetId" className="w-full">
-                      <SelectValue />
+                    <SelectTrigger id="categoryId" className="w-full">
+                      <SelectValue placeholder="Choose a category" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__general__">
-                        Any asset (general)
-                      </SelectItem>
-                      {assets.map((a) => (
-                        <SelectItem key={a.id} value={a.id}>
-                          {a.assetCode} — {a.name}
+                      {categories.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="description">Description</Label>
-                  <Textarea
-                    id="description"
-                    name="description"
-                    defaultValue={solution?.description}
-                    placeholder="Steps a technician can follow"
-                    required
-                  />
                 </div>
                 <DialogFooter className={isEdit ? "sm:justify-between" : undefined}>
                   {isEdit && (
@@ -205,7 +188,7 @@ export function SolutionFormDialog({
                       Cancel
                     </DialogClose>
                     <Button type="submit" disabled={pending}>
-                      {pending ? "Saving…" : isEdit ? "Save changes" : "Add solution"}
+                      {pending ? "Saving…" : isEdit ? "Save changes" : "Add type"}
                     </Button>
                   </div>
                 </DialogFooter>

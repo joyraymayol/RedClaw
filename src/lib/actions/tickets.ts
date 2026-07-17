@@ -43,7 +43,7 @@ export async function createTicket(
     assertCan(user, "createTicket");
 
     const parsed = newTicketSchema.safeParse({
-      machineId: formData.get("machineId"),
+      assetId: formData.get("assetId"),
       problemTypeId: formData.get("problemTypeId"),
       suggestedSolutionId: formData.get("suggestedSolutionId"),
       priority: formData.get("priority"),

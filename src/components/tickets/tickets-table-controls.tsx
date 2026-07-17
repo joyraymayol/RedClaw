@@ -68,7 +68,7 @@ export function TicketsSearch() {
         type="search"
         value={value}
         onChange={(e) => handleChange(e.target.value)}
-        placeholder="Search ticket #, title, machine…"
+        placeholder="Search ticket #, title, asset…"
         aria-label="Search tickets"
         className="pl-8"
       />

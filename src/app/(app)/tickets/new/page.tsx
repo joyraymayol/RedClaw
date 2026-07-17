@@ -16,8 +16,8 @@ export const metadata: Metadata = { title: "Raise a ticket" };
 export default async function NewTicketPage() {
   await requireActiveUser();
 
-  const [machines, problemTypes, solutions] = await Promise.all([
-    prisma.machine.findMany({
+  const [assets, problemTypes, solutions] = await Promise.all([
+    prisma.asset.findMany({
       orderBy: { assetCode: "asc" },
       select: { id: true, assetCode: true, name: true },
     }),
@@ -31,7 +31,7 @@ export default async function NewTicketPage() {
         title: true,
         description: true,
         problemTypeId: true,
-        machineId: true,
+        assetId: true,
       },
     }),
   ]);
@@ -47,7 +47,7 @@ export default async function NewTicketPage() {
         </CardHeader>
         <CardContent>
           <TicketForm
-            machines={machines}
+            assets={assets}
             problemTypes={problemTypes}
             solutions={solutions}
           />

@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { PencilIcon, PlusIcon, Trash2Icon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogClose,
@@ -15,49 +16,31 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  createSolution,
-  deleteSolution,
-  updateSolution,
-  type SolutionActionState,
-} from "@/lib/actions/solutions";
-import type { Solution } from "@/generated/prisma/client";
+  createAssetCategory,
+  deleteAssetCategory,
+  updateAssetCategory,
+  type AssetCategoryActionState,
+} from "@/lib/actions/asset-categories";
+import type { AssetCategory } from "@/generated/prisma/client";
 
-type AssetOption = { id: string; assetCode: string; name: string };
-
-export function SolutionFormDialog({
-  problemTypeId,
-  assets,
-  solution,
-}: {
-  problemTypeId: string;
-  assets: AssetOption[];
-  solution?: Solution;
-}) {
-  const isEdit = !!solution;
+export function AssetCategoryFormDialog({ category }: { category?: AssetCategory }) {
+  const isEdit = !!category;
   const [open, setOpen] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const action = isEdit ? updateSolution : createSolution;
-  // base-ui's <Select.Value> needs an explicit items map to show a label
-  // instead of the raw id once the popup (which registers labels) closes.
-  const assetItems = {
-    __general__: "Any asset (general)",
-    ...Object.fromEntries(assets.map((a) => [a.id, `${a.assetCode} — ${a.name}`])),
-  };
+  const action = isEdit ? updateAssetCategory : createAssetCategory;
+
+  const [tracksProducts, setTracksProducts] = useState(category?.tracksProducts ?? false);
+  const [supportsParentAsset, setSupportsParentAsset] = useState(
+    category?.supportsParentAsset ?? false
+  );
 
   function submit(formData: FormData) {
     startTransition(async () => {
-      const result: SolutionActionState = await action({}, formData);
+      const result: AssetCategoryActionState = await action({}, formData);
       if (result.success) {
         setOpen(false);
         setError(null);
@@ -68,9 +51,9 @@ export function SolutionFormDialog({
   }
 
   function handleDelete() {
-    if (!solution) return;
+    if (!category) return;
     startTransition(async () => {
-      const result = await deleteSolution(solution.id);
+      const result = await deleteAssetCategory(category.id);
       if (result.success) {
         setOpen(false);
         setError(null);
@@ -83,7 +66,10 @@ export function SolutionFormDialog({
 
   function handleOpenChange(next: boolean) {
     setOpen(next);
-    if (!next) {
+    if (next) {
+      setTracksProducts(category?.tracksProducts ?? false);
+      setSupportsParentAsset(category?.supportsParentAsset ?? false);
+    } else {
       setError(null);
       setConfirmingDelete(false);
     }
@@ -95,27 +81,27 @@ export function SolutionFormDialog({
         <Button
           variant="ghost"
           size="icon-sm"
-          aria-label={`Edit ${solution.title}`}
-          onClick={() => setOpen(true)}
+          aria-label={`Edit ${category.name}`}
+          onClick={() => handleOpenChange(true)}
         >
           <PencilIcon className="size-4" />
         </Button>
       ) : (
-        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-          <PlusIcon className="size-3.5" />
-          Add solution
+        <Button onClick={() => handleOpenChange(true)}>
+          <PlusIcon className="size-4" />
+          Add category
         </Button>
       )}
 
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="sm:max-w-md">
-          {confirmingDelete && solution ? (
+          {confirmingDelete && category ? (
             <>
               <DialogHeader>
-                <DialogTitle>Delete &quot;{solution.title}&quot;?</DialogTitle>
+                <DialogTitle>Delete &quot;{category.name}&quot;?</DialogTitle>
                 <DialogDescription>
-                  This can&apos;t be undone. If a ticket still references it
-                  as its suggested solution, deletion will be blocked.
+                  This can&apos;t be undone. If any assets or asset types still
+                  reference it, deletion will be blocked.
                 </DialogDescription>
               </DialogHeader>
               <DialogFooter>
@@ -135,58 +121,57 @@ export function SolutionFormDialog({
           ) : (
             <>
               <DialogHeader>
-                <DialogTitle>{isEdit ? "Edit solution" : "Add solution"}</DialogTitle>
+                <DialogTitle>{isEdit ? "Edit category" : "Add category"}</DialogTitle>
                 <DialogDescription>
-                  A curated fix requesters and technicians see when raising or
-                  working a ticket of this problem type.
+                  Categories group assets and drive category-specific behavior
+                  on the asset form.
                 </DialogDescription>
               </DialogHeader>
 
               {/* suppressHydrationWarning: Chrome iOS injects __gcruniqueid into forms */}
               <form action={submit} className="space-y-4" suppressHydrationWarning>
-                <input type="hidden" name="problemTypeId" value={problemTypeId} />
-                {isEdit && <input type="hidden" name="solutionId" value={solution.id} />}
+                {isEdit && (
+                  <input type="hidden" name="categoryId" value={category.id} />
+                )}
+                <input type="hidden" name="tracksProducts" value={String(tracksProducts)} />
+                <input
+                  type="hidden"
+                  name="supportsParentAsset"
+                  value={String(supportsParentAsset)}
+                />
                 <div className="space-y-2">
-                  <Label htmlFor="title">Title</Label>
+                  <Label htmlFor="name">Name</Label>
                   <Input
-                    id="title"
-                    name="title"
-                    defaultValue={solution?.title}
-                    placeholder="Replace worn drive belt"
+                    id="name"
+                    name="name"
+                    defaultValue={category?.name}
+                    placeholder="Production Machines"
                     required
                   />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="assetId">Applies to</Label>
-                  <Select
-                    name="assetId"
-                    items={assetItems}
-                    defaultValue={solution?.assetId ?? "__general__"}
-                  >
-                    <SelectTrigger id="assetId" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__general__">
-                        Any asset (general)
-                      </SelectItem>
-                      {assets.map((a) => (
-                        <SelectItem key={a.id} value={a.id}>
-                          {a.assetCode} — {a.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="description">Description</Label>
                   <Textarea
                     id="description"
                     name="description"
-                    defaultValue={solution?.description}
-                    placeholder="Steps a technician can follow"
-                    required
+                    defaultValue={category?.description ?? ""}
                   />
+                </div>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={tracksProducts}
+                      onCheckedChange={(checked) => setTracksProducts(checked === true)}
+                    />
+                    Tracks products (shows the Products card on assets)
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={supportsParentAsset}
+                      onCheckedChange={(checked) => setSupportsParentAsset(checked === true)}
+                    />
+                    Supports a parent asset (offers a parent picker on assets)
+                  </label>
                 </div>
                 <DialogFooter className={isEdit ? "sm:justify-between" : undefined}>
                   {isEdit && (
@@ -205,7 +190,7 @@ export function SolutionFormDialog({
                       Cancel
                     </DialogClose>
                     <Button type="submit" disabled={pending}>
-                      {pending ? "Saving…" : isEdit ? "Save changes" : "Add solution"}
+                      {pending ? "Saving…" : isEdit ? "Save changes" : "Add category"}
                     </Button>
                   </div>
                 </DialogFooter>

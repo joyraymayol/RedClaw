@@ -19,3 +19,17 @@ export const optionalText = (max: number) =>
     (v) => (v === null || v === "" ? undefined : v),
     z.string().trim().max(max).optional()
   );
+
+/**
+ * A checkbox field submitted via a controlled hidden input (value always
+ * "true" or "false", never absent) — see asset-category-form-dialog.tsx.
+ */
+export const checkboxBoolean = () =>
+  z.preprocess((v) => v === "true", z.boolean());
+
+/** An optional date field from an `<input type="date">` — "" means unset. */
+export const optionalDate = () =>
+  z.preprocess(
+    (v) => (v === null || v === "" ? undefined : v),
+    z.coerce.date().optional()
+  );

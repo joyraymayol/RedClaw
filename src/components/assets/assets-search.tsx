@@ -6,7 +6,7 @@ import { Loader2Icon, SearchIcon } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 
-export function MachinesSearch() {
+export function AssetsSearch() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -41,7 +41,7 @@ export function MachinesSearch() {
         value={value}
         onChange={(e) => handleChange(e.target.value)}
         placeholder="Search asset code, name, category…"
-        aria-label="Search machines"
+        aria-label="Search assets"
         className="pl-8"
       />
       {isWaiting && (

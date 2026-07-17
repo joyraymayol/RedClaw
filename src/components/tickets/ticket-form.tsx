@@ -18,24 +18,24 @@ import type { TicketPriority } from "@/generated/prisma/enums";
 
 const PRIORITIES: TicketPriority[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
 
-type MachineOption = { id: string; assetCode: string; name: string };
+type AssetOption = { id: string; assetCode: string; name: string };
 type ProblemTypeOption = { id: string; name: string };
 type SolutionOption = {
   id: string;
   title: string;
   description: string;
   problemTypeId: string;
-  machineId: string | null;
+  assetId: string | null;
 };
 
 const initialState: TicketActionState = {};
 
 export function TicketForm({
-  machines,
+  assets,
   problemTypes,
   solutions,
 }: {
-  machines: MachineOption[];
+  assets: AssetOption[];
   problemTypes: ProblemTypeOption[];
   solutions: SolutionOption[];
 }) {
@@ -43,23 +43,23 @@ export function TicketForm({
     createTicket,
     initialState
   );
-  const [machineId, setMachineId] = useState("");
+  const [assetId, setAssetId] = useState("");
   const [problemTypeId, setProblemTypeId] = useState("");
 
   const matchingSolutions = useMemo(() => {
     if (!problemTypeId) return [];
     return solutions
       .filter((s) => s.problemTypeId === problemTypeId)
-      .sort((a) => (a.machineId === machineId ? -1 : 0));
-  }, [solutions, problemTypeId, machineId]);
+      .sort((a) => (a.assetId === assetId ? -1 : 0));
+  }, [solutions, problemTypeId, assetId]);
 
   // base-ui's <Select.Value> only shows a label instead of the raw stored
   // value when the Root is given an explicit items map — without it, the
   // trigger falls back to printing the id once the popup (which is what
   // registers each item's rendered label) closes.
-  const machineItems = useMemo(
-    () => Object.fromEntries(machines.map((m) => [m.id, `${m.assetCode} — ${m.name}`])),
-    [machines]
+  const assetItems = useMemo(
+    () => Object.fromEntries(assets.map((a) => [a.id, `${a.assetCode} — ${a.name}`])),
+    [assets]
   );
   const problemTypeItems = useMemo(
     () => Object.fromEntries(problemTypes.map((pt) => [pt.id, pt.name])),
@@ -70,10 +70,10 @@ export function TicketForm({
       Object.fromEntries(
         matchingSolutions.map((s) => [
           s.id,
-          s.machineId === machineId ? `${s.title} (this machine)` : s.title,
+          s.assetId === assetId ? `${s.title} (this asset)` : s.title,
         ])
       ),
-    [matchingSolutions, machineId]
+    [matchingSolutions, assetId]
   );
 
   return (
@@ -81,21 +81,21 @@ export function TicketForm({
       {/* suppressHydrationWarning: Chrome iOS injects __gcruniqueid into forms */}
       <form action={formAction} className="space-y-5" suppressHydrationWarning>
         <div className="space-y-2">
-          <Label htmlFor="machineId">Machine</Label>
+          <Label htmlFor="assetId">Asset</Label>
           <Select
-            name="machineId"
-            items={machineItems}
-            value={machineId}
-            onValueChange={(v) => setMachineId(v ?? "")}
+            name="assetId"
+            items={assetItems}
+            value={assetId}
+            onValueChange={(v) => setAssetId(v ?? "")}
             required
           >
-            <SelectTrigger id="machineId" className="w-full">
-              <SelectValue placeholder="Select a machine" />
+            <SelectTrigger id="assetId" className="w-full">
+              <SelectValue placeholder="Select an asset" />
             </SelectTrigger>
             <SelectContent>
-              {machines.map((m) => (
-                <SelectItem key={m.id} value={m.id}>
-                  {m.assetCode} — {m.name}
+              {assets.map((a) => (
+                <SelectItem key={a.id} value={a.id}>
+                  {a.assetCode} — {a.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -134,7 +134,7 @@ export function TicketForm({
                 {matchingSolutions.map((s) => (
                   <SelectItem key={s.id} value={s.id}>
                     {s.title}
-                    {s.machineId === machineId ? " (this machine)" : ""}
+                    {s.assetId === assetId ? " (this asset)" : ""}
                   </SelectItem>
                 ))}
               </SelectContent>

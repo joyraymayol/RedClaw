@@ -13,10 +13,10 @@ export type SolutionActionState = {
 };
 
 function parseForm(formData: FormData) {
-  const machineId = formData.get("machineId");
+  const assetId = formData.get("assetId");
   return solutionSchema.safeParse({
     problemTypeId: formData.get("problemTypeId"),
-    machineId: machineId === "__general__" ? "" : machineId,
+    assetId: assetId === "__general__" ? "" : assetId,
     title: formData.get("title"),
     description: formData.get("description"),
   });

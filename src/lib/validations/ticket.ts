@@ -5,7 +5,7 @@ import { optionalId, optionalText } from "@/lib/validations/shared";
 // Attachments (private-bucket upload) are deferred — see plan §5/§9.
 
 export const newTicketSchema = z.object({
-  machineId: z.string().min(1, "Select a machine"),
+  assetId: z.string().min(1, "Select an asset"),
   problemTypeId: optionalId(),
   suggestedSolutionId: optionalId(),
   priority: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]),

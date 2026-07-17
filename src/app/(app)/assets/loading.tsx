@@ -1,7 +1,7 @@
 import { TableSkeleton } from "@/components/skeletons/table-skeleton";
 import { Skeleton } from "@/components/ui/skeleton";
 
-export default function MachinesLoading() {
+export default function AssetsLoading() {
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">

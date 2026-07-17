@@ -3,9 +3,9 @@
  *  1. Admin bootstrap: promotes the emails in ADMIN_BOOTSTRAP_EMAILS to
  *     ADMIN/ACTIVE. Each email must have signed in with Google at least
  *     once (the mirror trigger creates the row) — this never inserts users.
- *  2. Starter data (plan §8): enough machines, problem types, and SLA
- *     policies to click through the whole ticket flow. Upserted by their
- *     unique key, so re-running never duplicates rows.
+ *  2. Starter data (plan §8): enough asset categories/types/assets, problem
+ *     types, and SLA policies to click through the whole ticket flow.
+ *     Upserted by their unique key, so re-running never duplicates rows.
  *
  * Run with: npm run db:seed
  */
@@ -51,12 +51,19 @@ async function bootstrapAdmins() {
   }
 }
 
-const MACHINES = [
-  { assetCode: "CNC-014", name: "CNC Mill #3", category: "CNC", location: "Bay 3" },
-  { assetCode: "INJ-002", name: "Injection Molder #2", category: "Injection", location: "Bay 1" },
-  { assetCode: "CONV-007", name: "Main Line Conveyor", category: "Conveyor", location: "Assembly" },
-  { assetCode: "CMPR-001", name: "Air Compressor #1", category: "Compressor", location: "Utility Room" },
-  { assetCode: "EXT-005", name: "Extruder Line 5", category: "Extrusion", location: "Bay 2" },
+const ASSET_CATEGORIES = [
+  { name: "Production Machines", tracksProducts: true, supportsParentAsset: false },
+  { name: "Machine Accessories", tracksProducts: false, supportsParentAsset: true },
+  { name: "Facilities", tracksProducts: false, supportsParentAsset: false },
+  { name: "Fleet", tracksProducts: false, supportsParentAsset: false },
+] as const;
+
+const ASSETS = [
+  { assetCode: "CNC-014", name: "CNC Mill #3", category: "Production Machines", type: "CNC", location: "Bay 3" },
+  { assetCode: "INJ-002", name: "Injection Molder #2", category: "Production Machines", type: "Injection", location: "Bay 1" },
+  { assetCode: "CONV-007", name: "Main Line Conveyor", category: "Production Machines", type: "Conveyor", location: "Assembly" },
+  { assetCode: "CMPR-001", name: "Air Compressor #1", category: "Machine Accessories", type: "Compressor", location: "Utility Room" },
+  { assetCode: "EXT-005", name: "Extruder Line 5", category: "Production Machines", type: "Extrusion", location: "Bay 2" },
 ] as const;
 
 const PROBLEM_TYPES = [
@@ -76,14 +83,43 @@ const SLA_POLICIES = [
 ] as const;
 
 async function seedStarterData() {
-  for (const m of MACHINES) {
-    await prisma.machine.upsert({
-      where: { assetCode: m.assetCode },
+  const categoryIds = new Map<string, string>();
+  for (const c of ASSET_CATEGORIES) {
+    const category = await prisma.assetCategory.upsert({
+      where: { name: c.name },
       update: {},
-      create: m,
+      create: c,
+    });
+    categoryIds.set(c.name, category.id);
+  }
+  console.log(`✓ ${ASSET_CATEGORIES.length} asset categories ensured`);
+
+  const typeIds = new Map<string, string>();
+  for (const a of ASSETS) {
+    if (typeIds.has(a.type)) continue;
+    const categoryId = categoryIds.get(a.category)!;
+    const type = await prisma.assetType.upsert({
+      where: { categoryId_name: { categoryId, name: a.type } },
+      update: {},
+      create: { name: a.type, categoryId },
+    });
+    typeIds.set(a.type, type.id);
+  }
+
+  for (const a of ASSETS) {
+    await prisma.asset.upsert({
+      where: { assetCode: a.assetCode },
+      update: {},
+      create: {
+        assetCode: a.assetCode,
+        name: a.name,
+        location: a.location,
+        categoryId: categoryIds.get(a.category)!,
+        typeId: typeIds.get(a.type)!,
+      },
     });
   }
-  console.log(`✓ ${MACHINES.length} starter machines ensured`);
+  console.log(`✓ ${ASSETS.length} starter assets ensured`);
 
   for (const pt of PROBLEM_TYPES) {
     await prisma.problemType.upsert({

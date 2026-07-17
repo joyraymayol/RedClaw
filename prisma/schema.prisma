@@ -53,10 +53,11 @@ enum HoldReason {
   OTHER
 }
 
-enum MachineStatus {
+enum AssetStatus {
   OPERATIONAL
   DOWN
   UNDER_MAINTENANCE
+  RETIRED
 }
 
 enum RemarkType {
@@ -99,44 +100,86 @@ model User {
   solutionsAuthored Solution[]
   partsLogged       TicketPart[]
   downtimeLogged    DowntimeLog[]
-  usageReadings     MachineUsageLog[]
+  usageReadings     AssetUsageLog[]
 
   @@index([status])
 }
 
-model Machine {
-  id           String        @id @default(uuid())
-  assetCode    String        @unique // e.g. "CNC-014"
-  name         String
-  category     String? // e.g. "CNC", "Conveyor", "Compressor"
-  location     String?
-  status       MachineStatus @default(OPERATIONAL)
-  purchaseDate DateTime?
-  notes        String?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+model AssetCategory {
+  id                  String   @id @default(uuid())
+  name                String   @unique // e.g. "Production Machines", "Machine Accessories"
+  description         String?
+  tracksProducts      Boolean  @default(false) // Production Machines: shows the Products card + changeover
+  supportsParentAsset Boolean  @default(false) // Machine Accessories: offers a parent-asset picker
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  assets     Asset[]
+  assetTypes AssetType[]
+}
+
+model AssetType {
+  id         String @id @default(uuid())
+  name       String // e.g. "PET Stretch Blow", "Chiller", "Forklift"
+  categoryId String
+
+  category AssetCategory @relation(fields: [categoryId], references: [id])
+  assets   Asset[]
+
+  @@unique([categoryId, name])
+}
+
+model Asset {
+  id                String     @id @default(uuid())
+  assetCode         String     @unique // e.g. "CNC-014"
+  name              String
+  categoryId        String
+  typeId            String?
+  location          String?
+  status            AssetStatus @default(OPERATIONAL)
+  serialNumber      String?
+  manufacturer      String?
+  model             String?
+  purchaseDate      DateTime?
+  installedAt       DateTime?
+  commissionedAt    DateTime?
+  warrantyExpiresAt DateTime?
+  retiredAt         DateTime?
+  parentAssetId     String?
+  notes             String?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  category    AssetCategory @relation(fields: [categoryId], references: [id])
+  type        AssetType?    @relation(fields: [typeId], references: [id])
+  parentAsset Asset?        @relation("AssetParent", fields: [parentAssetId], references: [id])
+  childAssets Asset[]       @relation("AssetParent")
 
   tickets      Ticket[]
   solutions    Solution[]
   schedules    MaintenanceSchedule[]
   downtimeLogs DowntimeLog[]
-  usageLogs    MachineUsageLog[]
+  usageLogs    AssetUsageLog[]
+
+  @@index([categoryId])
+  @@index([status])
+  @@index([parentAssetId])
 }
 
 // Cumulative operating-hours readings — the data source for USAGE-based PM
-// schedules. Manual entry to start (a small form on the machine page);
+// schedules. Manual entry to start (a small form on the asset page);
 // swap in automated meter feeds later without touching the schema.
-model MachineUsageLog {
+model AssetUsageLog {
   id           String   @id @default(uuid())
-  machineId    String
-  hoursReading Int // cumulative hours on the machine's meter at reading time
+  assetId      String
+  hoursReading Int // cumulative hours on the asset's meter at reading time
   recordedById String
   recordedAt   DateTime @default(now())
 
-  machine    Machine @relation(fields: [machineId], references: [id])
-  recordedBy User    @relation(fields: [recordedById], references: [id])
+  asset      Asset @relation(fields: [assetId], references: [id])
+  recordedBy User  @relation(fields: [recordedById], references: [id])
 
-  @@index([machineId, recordedAt])
+  @@index([assetId, recordedAt])
 }
 
 model ProblemType {
@@ -154,7 +197,7 @@ model ProblemType {
 model Solution {
   id            String   @id @default(uuid())
   problemTypeId String
-  machineId     String? // null = applies generally, set = machine-specific
+  assetId       String? // null = applies generally, set = asset-specific
   title         String
   description   String
   authorId      String
@@ -162,7 +205,7 @@ model Solution {
   updatedAt     DateTime @updatedAt
 
   problemType ProblemType @relation(fields: [problemTypeId], references: [id])
-  machine     Machine?    @relation(fields: [machineId], references: [id])
+  asset       Asset?      @relation(fields: [assetId], references: [id])
   author      User        @relation(fields: [authorId], references: [id])
   tickets     Ticket[] // tickets created referencing this suggested solution
 }
@@ -184,7 +227,7 @@ model Ticket {
   ticketNumber         String         @unique // e.g. "TKT-2026-0341" — sequence-backed, formatted at insert time
   title                String
   description          String
-  machineId            String
+  assetId              String
   requesterId          String
   problemTypeId        String?
   suggestedSolutionId  String? // picked at creation time, if applicable
@@ -206,7 +249,7 @@ model Ticket {
   closedAt     DateTime? // supervisor closed
   cancelledAt  DateTime?
 
-  machine           Machine              @relation(fields: [machineId], references: [id])
+  asset             Asset                @relation(fields: [assetId], references: [id])
   requester         User                 @relation("Requester", fields: [requesterId], references: [id])
   problemType       ProblemType?         @relation(fields: [problemTypeId], references: [id])
   suggestedSolution Solution?            @relation(fields: [suggestedSolutionId], references: [id])
@@ -221,7 +264,7 @@ model Ticket {
 
   @@index([status])
   @@index([status, priority])
-  @@index([machineId])
+  @@index([assetId])
   @@index([createdAt])
 }
 
@@ -295,12 +338,12 @@ model TicketAttachment {
 // Preventive Maintenance: recurring rule that auto-generates a Ticket when due
 model MaintenanceSchedule {
   id              String                @id @default(uuid())
-  machineId       String
+  assetId         String
   problemTypeId   String? // e.g. "Scheduled lubrication"
   title           String
   frequencyType   ScheduleFrequencyType
   intervalDays    Int? // used when frequencyType = TIME
-  intervalUsage   Int? // used when frequencyType = USAGE (e.g. every 500 hrs) — compared against MachineUsageLog readings
+  intervalUsage   Int? // used when frequencyType = USAGE (e.g. every 500 hrs) — compared against AssetUsageLog readings
   lastGeneratedAt DateTime?
   nextDueAt       DateTime? // computed; drives the PM job
   defaultPriority TicketPriority        @default(MEDIUM)
@@ -308,27 +351,27 @@ model MaintenanceSchedule {
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
 
-  machine     Machine      @relation(fields: [machineId], references: [id])
+  asset       Asset        @relation(fields: [assetId], references: [id])
   problemType ProblemType? @relation(fields: [problemTypeId], references: [id])
   tickets     Ticket[] // tickets this schedule has generated
 }
 
-// Actual machine downtime — separate from ticket status so MTBF/MTTR are accurate
+// Actual asset downtime — separate from ticket status so MTBF/MTTR are accurate
 // even when downtime starts before a ticket exists or outlasts the fix
 model DowntimeLog {
   id         String    @id @default(uuid())
-  machineId  String
+  assetId    String
   ticketId   String? // linked once a ticket is raised for it
   startedAt  DateTime
   endedAt    DateTime?
   reason     String?
   loggedById String
 
-  machine  Machine @relation(fields: [machineId], references: [id])
+  asset    Asset   @relation(fields: [assetId], references: [id])
   ticket   Ticket? @relation(fields: [ticketId], references: [id])
   loggedBy User    @relation(fields: [loggedById], references: [id])
 
-  @@index([machineId])
+  @@index([assetId])
 }
 
 // Yearly-resetting atomic counter behind Ticket.ticketNumber. Only ever

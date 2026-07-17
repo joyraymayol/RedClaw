@@ -37,7 +37,7 @@ export default async function TicketDetailPage({
   const ticket = await prisma.ticket.findUnique({
     where: { id: ticketId },
     include: {
-      machine: { select: { id: true, assetCode: true, name: true } },
+      asset: { select: { id: true, assetCode: true, name: true } },
       requester: { select: { id: true, name: true } },
       assignments: {
         where: { unassignedAt: null },
@@ -130,10 +130,10 @@ export default async function TicketDetailPage({
             <h2 className="text-sm font-medium text-muted-foreground">Details</h2>
             <dl className="space-y-2">
               <div className="flex justify-between gap-4">
-                <dt className="text-muted-foreground">Machine</dt>
+                <dt className="text-muted-foreground">Asset</dt>
                 <dd>
-                  <Link href={`/machines/${ticket.machine.id}`} className="hover:underline">
-                    {ticket.machine.assetCode}
+                  <Link href={`/assets/${ticket.asset.id}`} className="hover:underline">
+                    {ticket.asset.assetCode}
                   </Link>
                 </dd>
               </div>
