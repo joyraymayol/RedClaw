@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { requireActiveUser } from "@/lib/auth";
+import { departmentLabel } from "@/lib/constants/org";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -25,7 +26,7 @@ export default async function DashboardPage() {
           </Badge>
         </div>
         <p className="text-sm text-muted-foreground">
-          {user.department} · {user.position}
+          {departmentLabel(user.department)} · {user.position ?? "—"}
         </p>
       </div>
 

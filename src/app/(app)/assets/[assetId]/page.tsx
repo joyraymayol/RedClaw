@@ -7,9 +7,14 @@ import { AssetProductsCard } from "@/components/assets/asset-products-card";
 import { AssetQrBlock } from "@/components/assets/asset-qr-block";
 import { AssetRetireButton } from "@/components/assets/asset-retire-button";
 import { AssetStatusBadge } from "@/components/assets/asset-status-badge";
+import { TableSkeleton } from "@/components/skeletons/table-skeleton";
 import { TicketPriorityBadge } from "@/components/tickets/ticket-priority-badge";
 import { TicketStatusBadge } from "@/components/tickets/ticket-status-badge";
 import { buttonVariants } from "@/components/ui/button";
+import { DateRangeFilter } from "@/components/ui/date-range-filter";
+import { DebouncedSearchInput } from "@/components/ui/debounced-search-input";
+import { ListNavPending, ListNavProvider } from "@/components/ui/list-nav-context";
+import { PaginationBar } from "@/components/ui/pagination-bar";
 import {
   Table,
   TableBody,
@@ -18,13 +23,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import type { Prisma } from "@/generated/prisma/client";
+import { DEFAULT_PER_PAGE } from "@/lib/constants/pagination";
 import { requireActiveUser } from "@/lib/auth";
+import { createdAtRange, parseDayParam } from "@/lib/date-range";
+import { formatDate as formatDateTimeOnly, formatDateTime } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { cn } from "@/lib/utils";
 
 function formatDate(d: Date | null) {
   if (!d) return "—";
-  return d.toLocaleDateString("en-PH", { year: "numeric", month: "short", day: "numeric" });
+  return formatDateTimeOnly(d);
 }
 
 export async function generateMetadata({
@@ -42,12 +51,15 @@ export async function generateMetadata({
 
 export default async function AssetDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ assetId: string }>;
+  searchParams: Promise<{ tQ?: string; tFrom?: string; tTo?: string; tPage?: string }>;
 }) {
   const user = await requireActiveUser();
   const canManage = user.role === "ADMIN" || user.role === "HEAD";
   const { assetId } = await params;
+  const sp = await searchParams;
 
   const asset = await prisma.asset.findUnique({
     where: { id: assetId },
@@ -80,10 +92,33 @@ export default async function AssetDetailPage({
 
   // Ever-flagged, not just currently-flagged — a past flag (since removed
   // by a re-flag) is still part of this asset's maintenance history.
+  const tQ = (sp.tQ ?? "").trim();
+  const tFromDate = parseDayParam(sp.tFrom);
+  const tToDate = parseDayParam(sp.tTo);
+  const tFrom = tFromDate ? sp.tFrom!.trim() : "";
+  const tTo = tToDate ? sp.tTo!.trim() : "";
+  const ticketCreatedAt = createdAtRange(tFromDate, tToDate);
+
+  const ticketWhere: Prisma.TicketWhereInput = {
+    assets: { some: { assetId } },
+    ...(ticketCreatedAt && { createdAt: ticketCreatedAt }),
+    ...(tQ && {
+      OR: [
+        { ticketNumber: { contains: tQ, mode: "insensitive" } },
+        { title: { contains: tQ, mode: "insensitive" } },
+      ],
+    }),
+  };
+
+  const ticketTotal = await prisma.ticket.count({ where: ticketWhere });
+  const ticketTotalPages = Math.max(1, Math.ceil(ticketTotal / DEFAULT_PER_PAGE));
+  const ticketPage = Math.min(Math.max(Math.floor(Number(sp.tPage)) || 1, 1), ticketTotalPages);
+
   const tickets = await prisma.ticket.findMany({
-    where: { assets: { some: { assetId } } },
+    where: ticketWhere,
     orderBy: { createdAt: "desc" },
-    take: 50,
+    skip: (ticketPage - 1) * DEFAULT_PER_PAGE,
+    take: DEFAULT_PER_PAGE,
     select: {
       id: true,
       ticketNumber: true,
@@ -94,7 +129,20 @@ export default async function AssetDetailPage({
     },
   });
 
-  const [categories, types, allAssets, allProducts] = canManage
+  const ticketRangeStart = ticketTotal === 0 ? 0 : (ticketPage - 1) * DEFAULT_PER_PAGE + 1;
+  const ticketRangeEnd = Math.min(ticketPage * DEFAULT_PER_PAGE, ticketTotal);
+
+  function ticketsHref(page: number) {
+    const p = new URLSearchParams();
+    if (tQ) p.set("tQ", tQ);
+    if (tFrom) p.set("tFrom", tFrom);
+    if (tTo) p.set("tTo", tTo);
+    if (page > 1) p.set("tPage", String(page));
+    const query = p.toString();
+    return query ? `/assets/${assetId}?${query}` : `/assets/${assetId}`;
+  }
+
+  const [categories, types, allAssets, allProducts, checklistTemplates] = canManage
     ? await Promise.all([
         prisma.assetCategory.findMany({
           orderBy: { name: "asc" },
@@ -112,8 +160,12 @@ export default async function AssetDetailPage({
           orderBy: { name: "asc" },
           select: { id: true, name: true },
         }),
+        prisma.pmChecklistTemplate.findMany({
+          orderBy: { name: "asc" },
+          select: { id: true, name: true },
+        }),
       ])
-    : [[], [], [], []];
+    : [[], [], [], [], []];
 
   return (
     <div className="space-y-6">
@@ -138,7 +190,13 @@ export default async function AssetDetailPage({
               assetName={asset.name}
               retired={asset.status === "RETIRED"}
             />
-            <AssetFormDialog asset={asset} categories={categories} types={types} assets={allAssets} />
+            <AssetFormDialog
+              asset={asset}
+              categories={categories}
+              types={types}
+              assets={allAssets}
+              checklistTemplates={checklistTemplates}
+            />
           </div>
         )}
       </div>
@@ -229,62 +287,93 @@ export default async function AssetDetailPage({
         </div>
       )}
 
-      <div className="space-y-2">
-        <h2 className="text-sm font-medium text-muted-foreground">
-          Tickets on this asset
-        </h2>
-        <div className="overflow-x-auto rounded-lg border">
-          <Table className="[&_td]:px-4 [&_td]:py-3 [&_th]:px-4">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Ticket</TableHead>
-                <TableHead>Title</TableHead>
-                <TableHead>Priority</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="hidden md:table-cell">Raised</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {tickets.length === 0 && (
-                <TableRow>
-                  <TableCell
-                    colSpan={5}
-                    className="py-10 text-center text-sm text-muted-foreground"
-                  >
-                    No tickets raised on this asset yet.
-                  </TableCell>
-                </TableRow>
-              )}
-              {tickets.map((t) => (
-                <TableRow key={t.id}>
-                  <TableCell>
-                    <Link
-                      href={`/tickets/${t.id}`}
-                      className={cn(buttonVariants({ variant: "outline", size: "xs" }), "font-mono")}
-                    >
-                      {t.ticketNumber}
-                    </Link>
-                  </TableCell>
-                  <TableCell>{t.title}</TableCell>
-                  <TableCell>
-                    <TicketPriorityBadge priority={t.priority} />
-                  </TableCell>
-                  <TableCell>
-                    <TicketStatusBadge status={t.status} />
-                  </TableCell>
-                  <TableCell className="hidden text-muted-foreground md:table-cell">
-                    {t.createdAt.toLocaleDateString("en-PH", {
-                      year: "numeric",
-                      month: "short",
-                      day: "numeric",
-                    })}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+      <ListNavProvider className="space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-sm font-medium text-muted-foreground">
+            Tickets on this asset
+          </h2>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <DateRangeFilter
+              label="Raised date"
+              fromParam="tFrom"
+              toParam="tTo"
+              resetParams={["tPage"]}
+            />
+            <DebouncedSearchInput
+              paramName="tQ"
+              placeholder="Search ticket #, title…"
+              ariaLabel="Search this asset's tickets"
+              resetParams={["tPage"]}
+            />
+          </div>
         </div>
-      </div>
+
+        <ListNavPending fallback={<TableSkeleton columns={5} rows={Math.min(DEFAULT_PER_PAGE, 6)} />}>
+          <div className="space-y-3">
+            <div className="overflow-x-auto rounded-lg border">
+              <Table className="[&_td]:px-4 [&_td]:py-3 [&_th]:px-4">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Ticket</TableHead>
+                    <TableHead>Title</TableHead>
+                    <TableHead>Priority</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="hidden md:table-cell">Raised</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {tickets.length === 0 && (
+                    <TableRow>
+                      <TableCell
+                        colSpan={5}
+                        className="py-10 text-center text-sm text-muted-foreground"
+                      >
+                        {tQ || tFrom || tTo
+                          ? "No tickets match those filters."
+                          : "No tickets raised on this asset yet."}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {tickets.map((t) => (
+                    <TableRow key={t.id}>
+                      <TableCell>
+                        <Link
+                          href={`/tickets/${t.id}`}
+                          className={cn(buttonVariants({ variant: "outline", size: "xs" }), "font-mono")}
+                        >
+                          {t.ticketNumber}
+                        </Link>
+                      </TableCell>
+                      <TableCell>{t.title}</TableCell>
+                      <TableCell>
+                        <TicketPriorityBadge priority={t.priority} />
+                      </TableCell>
+                      <TableCell>
+                        <TicketStatusBadge status={t.status} />
+                      </TableCell>
+                      <TableCell className="hidden text-muted-foreground md:table-cell">
+                        {formatDateTime(t.createdAt)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            {ticketTotal > 0 && (
+              <PaginationBar
+                total={ticketTotal}
+                page={ticketPage}
+                totalPages={ticketTotalPages}
+                rangeStart={ticketRangeStart}
+                rangeEnd={ticketRangeEnd}
+                itemLabel="ticket"
+                hrefFor={ticketsHref}
+              />
+            )}
+          </div>
+        </ListNavPending>
+      </ListNavProvider>
     </div>
   );
 }

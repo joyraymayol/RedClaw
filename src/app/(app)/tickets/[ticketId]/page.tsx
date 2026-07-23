@@ -4,12 +4,16 @@ import { notFound } from "next/navigation";
 
 import { RemarkThread } from "@/components/tickets/remark-thread";
 import { TicketActions } from "@/components/tickets/ticket-actions";
+import { TicketChecklistCard } from "@/components/tickets/ticket-checklist-card";
+import { TicketMaterialsCard } from "@/components/tickets/ticket-materials-card";
 import { TicketPriorityBadge } from "@/components/tickets/ticket-priority-badge";
 import { TicketStatusBadge } from "@/components/tickets/ticket-status-badge";
 import { TicketTimeline } from "@/components/tickets/ticket-timeline";
+import { TicketTypeBadge } from "@/components/tickets/ticket-type-badge";
 import { Separator } from "@/components/ui/separator";
 import { can } from "@/lib/authz";
 import { requireActiveUser } from "@/lib/auth";
+import { formatDateTime } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { toTicketContext } from "@/lib/ticket-context";
 
@@ -50,6 +54,8 @@ export default async function TicketDetailPage({
       },
       problemType: { select: { name: true } },
       suggestedSolution: { select: { title: true } },
+      targetProduct: { select: { name: true } },
+      productionPlanRow: { select: { plan: { select: { id: true, formNumber: true } } } },
       statusHistory: {
         orderBy: { createdAt: "asc" },
         include: { changedBy: { select: { name: true } } },
@@ -57,6 +63,14 @@ export default async function TicketDetailPage({
       remarks: {
         orderBy: { createdAt: "asc" },
         include: { user: { select: { name: true } } },
+      },
+      materialLogs: {
+        orderBy: { loggedAt: "asc" },
+        include: { loggedBy: { select: { name: true } } },
+      },
+      checklistResults: {
+        orderBy: { sortOrder: "asc" },
+        include: { checkedBy: { select: { name: true } } },
       },
     },
   });
@@ -104,6 +118,23 @@ export default async function TicketDetailPage({
     : [];
 
   const canComment = can(user, "addRemark", ctx).allowed;
+  const canLogMaterials = can(user, "logPartUsed", ctx).allowed;
+  const materials = ticket.materialLogs.map((m) => ({
+    id: m.id,
+    name: m.name,
+    quantity: m.quantity,
+    unit: m.unit,
+    loggedByName: m.loggedBy.name,
+    loggedAt: m.loggedAt,
+  }));
+  const checklist = ticket.checklistResults.map((r) => ({
+    id: r.id,
+    label: r.label,
+    done: r.done,
+    remark: r.remark,
+    checkedByName: r.checkedBy?.name ?? null,
+    checkedAt: r.checkedAt,
+  }));
 
   return (
     <div className="space-y-6">
@@ -118,6 +149,7 @@ export default async function TicketDetailPage({
           <p className="font-mono text-xs text-muted-foreground">{ticket.ticketNumber}</p>
           <h1 className="text-2xl font-semibold tracking-tight">{ticket.title}</h1>
           <div className="flex flex-wrap items-center gap-2 pt-1">
+            <TicketTypeBadge type={ticket.type} />
             <TicketStatusBadge status={ticket.status} />
             <TicketPriorityBadge priority={ticket.priority} />
             {ticket.reopenCount > 0 && (
@@ -143,6 +175,19 @@ export default async function TicketDetailPage({
             <p className="whitespace-pre-wrap text-sm">{ticket.description}</p>
           </div>
 
+          {checklist.length > 0 && (
+            <div className="space-y-3 rounded-lg border p-4">
+              <h2 className="text-sm font-medium text-muted-foreground">
+                Preventive-maintenance checklist
+              </h2>
+              <TicketChecklistCard
+                ticketId={ticket.id}
+                results={checklist}
+                canEdit={canLogMaterials}
+              />
+            </div>
+          )}
+
           <div className="space-y-3 rounded-lg border p-4">
             <h2 className="text-sm font-medium text-muted-foreground">Remarks</h2>
             <RemarkThread
@@ -151,6 +196,19 @@ export default async function TicketDetailPage({
               canComment={canComment}
             />
           </div>
+
+          {(materials.length > 0 || canLogMaterials) && (
+            <div className="space-y-3 rounded-lg border p-4">
+              <h2 className="text-sm font-medium text-muted-foreground">
+                Materials &amp; spare parts used
+              </h2>
+              <TicketMaterialsCard
+                ticketId={ticket.id}
+                materials={materials}
+                canLog={canLogMaterials}
+              />
+            </div>
+          )}
         </div>
 
         <div className="space-y-6">
@@ -194,15 +252,30 @@ export default async function TicketDetailPage({
                   <dd>{ticket.suggestedSolution.title}</dd>
                 </div>
               )}
+              {ticket.type === "MACHINE_SETUP" && (
+                <>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted-foreground">Target mold</dt>
+                    <dd className="text-right">{ticket.targetProduct?.name ?? "—"}</dd>
+                  </div>
+                  {ticket.productionPlanRow?.plan && (
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-muted-foreground">Production plan</dt>
+                      <dd className="text-right">
+                        <Link
+                          href={`/production-plans/${ticket.productionPlanRow.plan.id}`}
+                          className="font-mono hover:underline"
+                        >
+                          {ticket.productionPlanRow.plan.formNumber}
+                        </Link>
+                      </dd>
+                    </div>
+                  )}
+                </>
+              )}
               <div className="flex justify-between gap-4">
                 <dt className="text-muted-foreground">Raised</dt>
-                <dd>
-                  {ticket.createdAt.toLocaleDateString("en-PH", {
-                    year: "numeric",
-                    month: "short",
-                    day: "numeric",
-                  })}
-                </dd>
+                <dd>{formatDateTime(ticket.createdAt)}</dd>
               </div>
             </dl>
           </div>

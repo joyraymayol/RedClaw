@@ -26,6 +26,8 @@ import {
 } from "@/components/ui/table";
 import type { Prisma } from "@/generated/prisma/client";
 import { requireRole } from "@/lib/auth";
+import { DEPARTMENT_LABELS, DEPARTMENTS, departmentLabel } from "@/lib/constants/org";
+import { formatDateTime } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { cn } from "@/lib/utils";
 
@@ -157,13 +159,24 @@ export default async function AdminUsersPage({
   const dir: SortDir = params.dir === "desc" ? "desc" : "asc";
   const state: TableState = { filter: filter.key, q, perPage, sort, dir };
 
+  // department is now an enum, so match by label/value rather than ILIKE.
+  const matchedDepartments = q
+    ? DEPARTMENTS.filter(
+        (d) =>
+          d.toLowerCase().includes(q.toLowerCase()) ||
+          DEPARTMENT_LABELS[d].toLowerCase().includes(q.toLowerCase())
+      )
+    : [];
+
   const where: Prisma.UserWhereInput = {
     ...filter.where,
     ...(q && {
       OR: [
         { name: { contains: q, mode: "insensitive" } },
         { email: { contains: q, mode: "insensitive" } },
-        { department: { contains: q, mode: "insensitive" } },
+        ...(matchedDepartments.length > 0
+          ? [{ department: { in: matchedDepartments } }]
+          : []),
         { position: { contains: q, mode: "insensitive" } },
       ],
     }),
@@ -299,7 +312,7 @@ export default async function AdminUsersPage({
                   {u.email}
                 </TableCell>
                 <TableCell className="hidden lg:table-cell">
-                  {u.department ?? "—"}
+                  {departmentLabel(u.department)}
                 </TableCell>
                 <TableCell className="hidden lg:table-cell">
                   {u.position ?? "—"}
@@ -313,11 +326,7 @@ export default async function AdminUsersPage({
                   )}
                 </TableCell>
                 <TableCell className="hidden text-xs text-muted-foreground md:table-cell">
-                  {u.createdAt.toLocaleDateString("en-PH", {
-                    year: "numeric",
-                    month: "short",
-                    day: "numeric",
-                  })}
+                  {formatDateTime(u.createdAt)}
                 </TableCell>
                 <TableCell className="text-right">
                   <UserActionsDialog user={u} isSelf={u.id === admin.id} />

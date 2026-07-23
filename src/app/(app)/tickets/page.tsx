@@ -10,7 +10,9 @@ import {
 import { TableSkeleton } from "@/components/skeletons/table-skeleton";
 import { TicketPriorityBadge } from "@/components/tickets/ticket-priority-badge";
 import { TicketStatusBadge } from "@/components/tickets/ticket-status-badge";
+import { TICKET_TYPE_LABELS, TicketTypeBadge } from "@/components/tickets/ticket-type-badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { DateRangeFilter } from "@/components/ui/date-range-filter";
 import { DebouncedSearchInput } from "@/components/ui/debounced-search-input";
 import { ListNavPending, ListNavProvider } from "@/components/ui/list-nav-context";
 import { PaginationBar } from "@/components/ui/pagination-bar";
@@ -28,8 +30,10 @@ import {
   DEFAULT_PER_PAGE,
   PER_PAGE_OPTIONS,
 } from "@/lib/constants/tickets-table";
-import type { Prisma, TicketStatus } from "@/generated/prisma/client";
+import type { Prisma, TicketStatus, TicketType } from "@/generated/prisma/client";
 import { requireActiveUser } from "@/lib/auth";
+import { createdAtRange, parseDayParam } from "@/lib/date-range";
+import { formatDateTime } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { cn } from "@/lib/utils";
 
@@ -87,10 +91,15 @@ const SORT_COLUMNS: Record<string, (dir: SortDir) => Prisma.TicketOrderByWithRel
 const DEFAULT_SORT = "created";
 const DEFAULT_DIR: SortDir = "desc";
 
+const TICKET_TYPES = Object.keys(TICKET_TYPE_LABELS) as TicketType[];
+
 type TableState = {
   filter: string;
   category: string;
+  type: string;
   q: string;
+  from: string;
+  to: string;
   perPage: number;
   sort: string;
   dir: SortDir;
@@ -100,7 +109,10 @@ function tableHref(state: TableState, page?: number) {
   const params = new URLSearchParams();
   if (state.filter !== "all") params.set("filter", state.filter);
   if (state.category) params.set("category", state.category);
+  if (state.type) params.set("type", state.type);
   if (state.q) params.set("q", state.q);
+  if (state.from) params.set("from", state.from);
+  if (state.to) params.set("to", state.to);
   if (state.perPage !== DEFAULT_PER_PAGE) params.set("perPage", String(state.perPage));
   if (state.sort !== DEFAULT_SORT || state.dir !== DEFAULT_DIR) {
     params.set("sort", state.sort);
@@ -151,7 +163,10 @@ export default async function TicketsPage({
   searchParams: Promise<{
     filter?: string;
     category?: string;
+    type?: string;
     q?: string;
+    from?: string;
+    to?: string;
     page?: string;
     perPage?: string;
     sort?: string;
@@ -163,7 +178,13 @@ export default async function TicketsPage({
 
   const filter = FILTERS.find((f) => f.key === params.filter) ?? FILTERS[0];
   const category = params.category?.trim() ?? "";
+  const type =
+    params.type && (TICKET_TYPES as string[]).includes(params.type) ? params.type : "";
   const q = params.q?.trim() ?? "";
+  const fromDate = parseDayParam(params.from);
+  const toDate = parseDayParam(params.to);
+  const from = fromDate ? params.from!.trim() : "";
+  const to = toDate ? params.to!.trim() : "";
   const perPageParam = Number(params.perPage);
   const perPage = (PER_PAGE_OPTIONS as readonly number[]).includes(perPageParam)
     ? perPageParam
@@ -171,7 +192,7 @@ export default async function TicketsPage({
   const sortParam = params.sort && params.sort in SORT_COLUMNS ? params.sort : null;
   const sort = sortParam ?? DEFAULT_SORT;
   const dir: SortDir = sortParam ? (params.dir === "desc" ? "desc" : "asc") : DEFAULT_DIR;
-  const state: TableState = { filter: filter.key, category, q, perPage, sort, dir };
+  const state: TableState = { filter: filter.key, category, type, q, from, to, perPage, sort, dir };
 
   const categories = await prisma.assetCategory.findMany({
     orderBy: { name: "asc" },
@@ -188,8 +209,12 @@ export default async function TicketsPage({
         ? { assignments: { some: { technicianId: user.id, unassignedAt: null } } }
         : {};
 
+  const createdAt = createdAtRange(fromDate, toDate);
+
   const scopedWhere: Prisma.TicketWhereInput = {
     ...scope,
+    ...(createdAt && { createdAt }),
+    ...(type && { type: type as TicketType }),
     ...(category && { assets: { some: { unflaggedAt: null, asset: { categoryId: category } } } }),
     ...(q && {
       OR: [
@@ -302,11 +327,14 @@ export default async function TicketsPage({
               );
             })}
           </div>
-          <DebouncedSearchInput
-            placeholder="Search ticket #, title, asset…"
-            ariaLabel="Search tickets"
-            resetParams={["page"]}
-          />
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <DateRangeFilter label="Raised date" resetParams={["page"]} />
+            <DebouncedSearchInput
+              placeholder="Search ticket #, title, asset…"
+              ariaLabel="Search tickets"
+              resetParams={["page"]}
+            />
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-1">
@@ -333,6 +361,34 @@ export default async function TicketsPage({
               )}
             >
               {c.name}
+            </Link>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1">
+          <Link
+            href={tableHref({ ...state, type: "" })}
+            className={cn(
+              "rounded-md px-2.5 py-1.5 text-sm transition-colors",
+              !type
+                ? "bg-muted font-medium text-foreground"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            All types
+          </Link>
+          {TICKET_TYPES.map((t) => (
+            <Link
+              key={t}
+              href={tableHref({ ...state, type: t })}
+              className={cn(
+                "rounded-md px-2.5 py-1.5 text-sm transition-colors",
+                type === t
+                  ? "bg-muted font-medium text-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {TICKET_TYPE_LABELS[t]}
             </Link>
           ))}
         </div>
@@ -394,7 +450,14 @@ export default async function TicketsPage({
                           {t.ticketNumber}
                         </Link>
                       </TableCell>
-                      <TableCell className="max-w-64 truncate">{t.title}</TableCell>
+                      <TableCell className="max-w-64">
+                        <span className="block truncate">{t.title}</span>
+                        {t.type !== "MAINTENANCE" && (
+                          <span className="mt-1 inline-block">
+                            <TicketTypeBadge type={t.type} />
+                          </span>
+                        )}
+                      </TableCell>
                       <TableCell
                         className="hidden text-muted-foreground md:table-cell"
                         title={t.assets.map((a) => a.asset.assetCode).join(", ") || undefined}
@@ -422,11 +485,7 @@ export default async function TicketsPage({
                         <TicketStatusBadge status={t.status} />
                       </TableCell>
                       <TableCell className="hidden text-xs text-muted-foreground md:table-cell">
-                        {t.createdAt.toLocaleDateString("en-PH", {
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                        })}
+                        {formatDateTime(t.createdAt)}
                       </TableCell>
                     </TableRow>
                   ))}

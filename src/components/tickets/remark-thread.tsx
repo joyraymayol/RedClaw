@@ -5,6 +5,7 @@ import { useActionState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { addRemark, type TicketActionState } from "@/lib/actions/tickets";
+import { formatDateTimeParts } from "@/lib/format";
 
 type Remark = {
   id: string;
@@ -40,25 +41,22 @@ export function RemarkThread({
         <p className="text-sm text-muted-foreground">No remarks yet.</p>
       ) : (
         <ul className="space-y-3">
-          {remarks.map((r) => (
-            <li key={r.id} className="rounded-md border bg-muted/30 p-3 text-sm">
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="font-medium">{r.user.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  {r.createdAt.toLocaleDateString("en-PH", {
-                    month: "short",
-                    day: "numeric",
-                  })}
-                  {", "}
-                  {r.createdAt.toLocaleTimeString("en-PH", {
-                    hour: "numeric",
-                    minute: "2-digit",
-                  })}
-                </span>
-              </div>
-              <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{r.body}</p>
-            </li>
-          ))}
+          {remarks.map((r) => {
+            const ts = formatDateTimeParts(r.createdAt);
+            return (
+              <li key={r.id} className="rounded-md border bg-muted/30 p-3 text-sm">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="font-medium">{r.user.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {ts.date}
+                    {", "}
+                    {ts.time}
+                  </span>
+                </div>
+                <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{r.body}</p>
+              </li>
+            );
+          })}
         </ul>
       )}
 

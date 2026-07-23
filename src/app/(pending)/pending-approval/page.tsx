@@ -12,6 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { requireUser } from "@/lib/auth";
+import { departmentLabel } from "@/lib/constants/org";
 
 export const metadata: Metadata = {
   title: "Awaiting approval",
@@ -58,7 +59,7 @@ export default async function PendingApprovalPage() {
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-muted-foreground">Department</dt>
-                <dd className="text-right font-medium">{user.department}</dd>
+                <dd className="text-right font-medium">{departmentLabel(user.department)}</dd>
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-muted-foreground">Position</dt>

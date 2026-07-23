@@ -4,6 +4,8 @@ import { TicketStatus, UserRole } from "@/generated/prisma/enums";
 import {
   assertCan,
   can,
+  canCreateTicketType,
+  canPreparePlan,
   ForbiddenError,
   type Actor,
   type TicketAction,
@@ -13,7 +15,13 @@ import {
 const ALL_ROLES = Object.values(UserRole);
 
 function actor(overrides: Partial<Actor> = {}): Actor {
-  return { id: "user-1", role: UserRole.REQUESTER, status: "ACTIVE", ...overrides };
+  return {
+    id: "user-1",
+    role: UserRole.REQUESTER,
+    status: "ACTIVE",
+    department: null,
+    ...overrides,
+  };
 }
 
 function ticket(overrides: Partial<TicketContext> = {}): TicketContext {
@@ -57,6 +65,103 @@ describe("createTicket", () => {
     for (const role of ALL_ROLES) {
       expect(can(actor({ role }), "createTicket").allowed).toBe(true);
     }
+  });
+});
+
+describe("canCreateTicketType", () => {
+  const maintHead = actor({ role: UserRole.HEAD, department: "MAINTENANCE" });
+  const maintSup = actor({ role: UserRole.SUPERVISOR, department: "MAINTENANCE" });
+  const maintTech = actor({ role: UserRole.TECHNICIAN, department: "MAINTENANCE" });
+  const prodSup = actor({ role: UserRole.SUPERVISOR, department: "PRODUCTION" });
+
+  it("lets any active employee raise a MAINTENANCE ticket", () => {
+    for (const a of [requester, technician, prodSup, maintTech]) {
+      expect(canCreateTicketType(a, "MAINTENANCE").allowed).toBe(true);
+    }
+  });
+
+  it("restricts PM and Machine-Setup to Maintenance leads (HEAD/SUPERVISOR) and ADMIN", () => {
+    for (const type of ["PREVENTIVE_MAINTENANCE", "MACHINE_SETUP"] as const) {
+      expect(canCreateTicketType(maintHead, type).allowed).toBe(true);
+      expect(canCreateTicketType(maintSup, type).allowed).toBe(true);
+      expect(canCreateTicketType(admin, type).allowed).toBe(true);
+      // Denied: Maintenance technician, Production supervisor, plain requester
+      expect(canCreateTicketType(maintTech, type).allowed).toBe(false);
+      expect(canCreateTicketType(prodSup, type).allowed).toBe(false);
+      expect(canCreateTicketType(requester, type).allowed).toBe(false);
+    }
+  });
+
+  it("denies non-ACTIVE accounts any type", () => {
+    const blocked = actor({ role: UserRole.HEAD, department: "MAINTENANCE", status: "DISABLED" });
+    expect(canCreateTicketType(blocked, "MAINTENANCE").allowed).toBe(false);
+  });
+});
+
+describe("canPreparePlan", () => {
+  const prodStaff = actor({ role: UserRole.REQUESTER, department: "PRODUCTION" });
+  const prodSup = actor({ role: UserRole.SUPERVISOR, department: "PRODUCTION" });
+  const maintHead = actor({ role: UserRole.HEAD, department: "MAINTENANCE" });
+  const qaSup = actor({ role: UserRole.SUPERVISOR, department: "QUALITY_ASSURANCE" });
+
+  it("allows any active Production-department user, regardless of role", () => {
+    for (const a of [prodStaff, prodSup]) {
+      expect(canPreparePlan(a)).toBe(true);
+    }
+  });
+
+  it("allows ADMIN as a global override, whatever their department", () => {
+    expect(canPreparePlan(admin)).toBe(true);
+    expect(canPreparePlan(actor({ role: UserRole.ADMIN, department: "WAREHOUSE" }))).toBe(true);
+  });
+
+  it("denies non-Production, non-ADMIN users", () => {
+    for (const a of [maintHead, qaSup, requester, technician, supervisor, head]) {
+      expect(canPreparePlan(a)).toBe(false);
+    }
+  });
+
+  it("denies non-ACTIVE or role-less accounts even in Production", () => {
+    expect(canPreparePlan(actor({ department: "PRODUCTION", status: "DISABLED" }))).toBe(false);
+    expect(canPreparePlan(actor({ department: "PRODUCTION", role: null }))).toBe(false);
+  });
+});
+
+describe("Machine-Setup dual approval", () => {
+  const maintHead = actor({ id: "mh", role: UserRole.HEAD, department: "MAINTENANCE" });
+  const qaSup = actor({ id: "qs", role: UserRole.SUPERVISOR, department: "QUALITY_ASSURANCE" });
+  const prodHead = actor({ id: "ph", role: UserRole.HEAD, department: "PRODUCTION" });
+
+  it("lets a Maintenance lead approve at the maintenance stage, but not QA at that stage", () => {
+    const t = ticket({ status: TicketStatus.PENDING_MAINTENANCE_APPROVAL });
+    expect(can(maintHead, "approveSetupMaintenance", t).allowed).toBe(true);
+    expect(can(qaSup, "approveSetupMaintenance", t).allowed).toBe(false);
+    expect(can(prodHead, "approveSetupMaintenance", t).allowed).toBe(false);
+  });
+
+  it("lets a QA lead approve at the QA stage, but not before", () => {
+    const atMaint = ticket({ status: TicketStatus.PENDING_MAINTENANCE_APPROVAL });
+    const atQa = ticket({ status: TicketStatus.PENDING_QA_APPROVAL });
+    expect(can(qaSup, "approveSetupQa", atQa).allowed).toBe(true);
+    // status guard (state machine) blocks approving QA while still at the maintenance stage
+    expect(can(qaSup, "approveSetupQa", atMaint).allowed).toBe(false);
+    expect(can(maintHead, "approveSetupQa", atQa).allowed).toBe(false);
+  });
+
+  it("lets the current stage's approver reject, scoped to their stage", () => {
+    const atMaint = ticket({ status: TicketStatus.PENDING_MAINTENANCE_APPROVAL });
+    const atQa = ticket({ status: TicketStatus.PENDING_QA_APPROVAL });
+    expect(can(maintHead, "rejectSetup", atMaint).allowed).toBe(true);
+    expect(can(qaSup, "rejectSetup", atMaint).allowed).toBe(false);
+    expect(can(qaSup, "rejectSetup", atQa).allowed).toBe(true);
+    expect(can(maintHead, "rejectSetup", atQa).allowed).toBe(false);
+  });
+
+  it("treats ADMIN as a global override for both approval stages", () => {
+    const atMaint = ticket({ status: TicketStatus.PENDING_MAINTENANCE_APPROVAL });
+    const atQa = ticket({ status: TicketStatus.PENDING_QA_APPROVAL });
+    expect(can(admin, "approveSetupMaintenance", atMaint).allowed).toBe(true);
+    expect(can(admin, "approveSetupQa", atQa).allowed).toBe(true);
   });
 });
 

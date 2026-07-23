@@ -5,10 +5,11 @@ import { redirect } from "next/navigation";
 
 import { runAction } from "@/lib/actions/action-helpers";
 import { requireActiveUser } from "@/lib/auth";
-import { assertCan } from "@/lib/authz";
+import { assertCan, canCreateTicketType } from "@/lib/authz";
 import { diffIds } from "@/lib/id-diff";
 import { ConflictError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
+import { applyCurrentProduct } from "@/lib/product-changeover";
 import { nextTicketNumber } from "@/lib/ticket-number";
 import {
   openAssetFlagsInclude,
@@ -22,9 +23,12 @@ import {
   cancelSchema,
   flagAssetsSchema,
   holdSchema,
+  logMaterialSchema,
   newTicketSchema,
+  removeMaterialSchema,
   reopenSchema,
   rejectReviewSchema,
+  rejectSetupSchema,
   remarkSchema,
   ticketIdSchema,
 } from "@/lib/validations/ticket";
@@ -48,6 +52,7 @@ export async function createTicket(
     assertCan(user, "createTicket");
 
     const parsed = newTicketSchema.safeParse({
+      type: formData.get("type") ?? undefined,
       assetId: formData.get("assetId"),
       problemTypeId: formData.get("problemTypeId"),
       suggestedSolutionId: formData.get("suggestedSolutionId"),
@@ -56,14 +61,33 @@ export async function createTicket(
       description: formData.get("description"),
     });
     if (!parsed.success) return { error: parsed.error.issues[0].message };
-    const { priority, assetId, ...rest } = parsed.data;
+    const { priority, assetId, type, targetProductId, ...rest } = parsed.data;
+
+    // Type-specific creation gate (department + role). MAINTENANCE is open to
+    // any active employee; PM/Machine-Setup are Maintenance-lead only.
+    const typeVerdict = canCreateTicketType(user, type);
+    if (!typeVerdict.allowed) return { error: typeVerdict.reason };
 
     const asset = await prisma.asset.findUnique({
       where: { id: assetId },
-      select: { status: true },
+      select: {
+        status: true,
+        pmChecklistTemplateId: true,
+        productCapabilities: { select: { productId: true } },
+      },
     });
     if (!asset || asset.status === "RETIRED") {
       return { error: "Selected asset is retired or no longer exists." };
+    }
+
+    // A manually-raised Machine-Setup may name the mold to switch to on QA
+    // close — it must be one the machine is capable of running.
+    let setupTargetProductId: string | null = null;
+    if (type === "MACHINE_SETUP" && targetProductId) {
+      if (!asset.productCapabilities.some((c) => c.productId === targetProductId)) {
+        return { error: "Choose a target product this machine is capable of running." };
+      }
+      setupTargetProductId = targetProductId;
     }
 
     const ticketId = await prisma.$transaction(async (tx) => {
@@ -77,7 +101,9 @@ export async function createTicket(
       const ticket = await tx.ticket.create({
         data: {
           ...rest,
+          type,
           priority,
+          targetProductId: setupTargetProductId,
           ticketNumber: await nextTicketNumber(tx),
           requesterId: user.id,
           ackDueAt,
@@ -93,6 +119,113 @@ export async function createTicket(
         data: { ticketId: ticket.id, fromStatus: null, toStatus: "OPEN", changedById: user.id },
       });
 
+      // PM tickets snapshot the machine's default checklist so later template
+      // edits never rewrite this ticket's checklist.
+      if (type === "PREVENTIVE_MAINTENANCE" && asset.pmChecklistTemplateId) {
+        const items = await tx.pmChecklistTemplateItem.findMany({
+          where: { templateId: asset.pmChecklistTemplateId },
+          orderBy: { sortOrder: "asc" },
+          select: { label: true, sortOrder: true },
+        });
+        if (items.length > 0) {
+          await tx.ticketChecklistResult.createMany({
+            data: items.map((it) => ({
+              ticketId: ticket.id,
+              label: it.label,
+              sortOrder: it.sortOrder,
+            })),
+          });
+        }
+      }
+
+      return ticket.id;
+    });
+
+    return { success: true, ticketId };
+  });
+
+  if (result.success && result.ticketId) {
+    revalidatePath("/tickets");
+    redirect(`/tickets/${result.ticketId}`);
+  }
+  return result;
+}
+
+/**
+ * Spin a Machine-Setup ticket off an approved Production Plan row (plan §6),
+ * pre-filled with the row's machine and target product. One open setup ticket
+ * per row; Maintenance leads only.
+ */
+export async function createMachineSetupFromPlanRow(
+  rowId: string
+): Promise<TicketActionState> {
+  const result = await runAction<CreateTicketResult>(async () => {
+    const user = await requireActiveUser();
+    const verdict = canCreateTicketType(user, "MACHINE_SETUP");
+    if (!verdict.allowed) return { error: verdict.reason };
+
+    const row = await prisma.productionPlanRow.findUnique({
+      where: { id: rowId },
+      include: {
+        plan: { select: { status: true, formNumber: true } },
+        asset: { select: { id: true, name: true, status: true } },
+        product: { select: { name: true } },
+      },
+    });
+    if (!row) return { error: "Plan row not found." };
+    if (row.plan.status !== "APPROVED") {
+      return { error: "The plan must be approved before creating setup tickets." };
+    }
+    if (row.asset.status === "RETIRED") {
+      return { error: "That machine is retired." };
+    }
+
+    // One open setup ticket per row — don't spawn duplicates.
+    const existing = await prisma.ticket.findFirst({
+      where: { productionPlanRowId: rowId, status: { notIn: ["CLOSED", "CANCELLED"] } },
+      select: { ticketNumber: true },
+    });
+    if (existing) {
+      return {
+        error: `A machine-setup ticket (${existing.ticketNumber}) already exists for this row.`,
+      };
+    }
+
+    const productLabel = row.product?.name ?? "no product set";
+    const description =
+      `Mold change from Production Plan ${row.plan.formNumber}.\n` +
+      `Target product: ${productLabel}.` +
+      (row.statusInstruction ? `\nStatus: ${row.statusInstruction}` : "") +
+      (row.referenceCycleTime ? `\nReference cycle time: ${row.referenceCycleTime}` : "");
+
+    const ticketId = await prisma.$transaction(async (tx) => {
+      const slaPolicy = await tx.slaPolicy.findUnique({ where: { priority: "MEDIUM" } });
+      const now = Date.now();
+      const ackDueAt = slaPolicy ? new Date(now + slaPolicy.ackMinutes * 60_000) : null;
+      const resolveDueAt = slaPolicy
+        ? new Date(now + slaPolicy.resolveMinutes * 60_000)
+        : null;
+
+      const ticket = await tx.ticket.create({
+        data: {
+          type: "MACHINE_SETUP",
+          title: `Machine setup — ${row.asset.name}`,
+          description,
+          priority: "MEDIUM",
+          requesterId: user.id,
+          productionPlanRowId: row.id,
+          targetProductId: row.productId,
+          ticketNumber: await nextTicketNumber(tx),
+          ackDueAt,
+          resolveDueAt,
+        },
+      });
+      await tx.ticketAsset.create({
+        data: { ticketId: ticket.id, assetId: row.asset.id, flaggedById: user.id },
+      });
+      await tx.ticketStatusHistory.create({
+        data: { ticketId: ticket.id, fromStatus: null, toStatus: "OPEN", changedById: user.id },
+      });
       return ticket.id;
     });
 
@@ -132,7 +265,7 @@ async function runTransition(
   if (!ticket) throw new ConflictError("Ticket not found.");
 
   assertCan(user, action, toTicketContext(ticket));
-  const toStatus = transitionTarget(action);
+  const toStatus = transitionTarget(action, ticket.type);
 
   await prisma.$transaction(async (tx) => {
     if (options.guard) await options.guard(tx);
@@ -192,7 +325,11 @@ export async function startWork(
     if (!ticketId) return { error: "Missing ticket." };
 
     const user = await requireActiveUser();
-    const ticket = await prisma.ticket.findUnique({ where: { id: ticketId } });
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      include: { assets: { where: { unflaggedAt: null }, select: { assetId: true } } },
+    });
+    const assetIds = ticket?.assets.map((a) => a.assetId) ?? [];
     await runTransition(ticketId, "startWork", {
       data: ticket?.startedAt ? {} : { startedAt: new Date() },
       guard: async (tx) => {
@@ -201,6 +338,23 @@ export async function startWork(
           throw new ConflictError(
             `Finish or hold ${busy.ticketNumber} before starting another ticket.`
           );
+        }
+        // A machine setup can't begin while the same machine still has an open
+        // Preventive-Maintenance ticket — PM must finish first (plan §6).
+        if (ticket?.type === "MACHINE_SETUP" && assetIds.length > 0) {
+          const openPm = await tx.ticket.findFirst({
+            where: {
+              type: "PREVENTIVE_MAINTENANCE",
+              status: { notIn: ["CLOSED", "CANCELLED"] },
+              assets: { some: { unflaggedAt: null, assetId: { in: assetIds } } },
+            },
+            select: { ticketNumber: true },
+          });
+          if (openPm) {
+            throw new ConflictError(
+              `Finish the open Preventive Maintenance ticket ${openPm.ticketNumber} on this machine first.`
+            );
+          }
         }
       },
     });
@@ -341,6 +495,84 @@ export async function rejectReview(
     if (!parsed.success) return { error: parsed.error.issues[0].message };
 
     await runTransition(parsed.data.ticketId, "rejectReview", {
+      data: { reopenCount: { increment: 1 } },
+      note: parsed.data.note,
+    });
+    return { success: true };
+  });
+}
+
+// ── Machine-Setup dual approval (sequential: Maintenance → QA) ─────────────
+// approveSetupQa closes the ticket; Phase 6 additionally updates the
+// machine's current product (mold) inside that same transition.
+
+export async function approveSetupMaintenance(
+  _prevState: TicketActionState,
+  formData: FormData
+): Promise<TicketActionState> {
+  return runAction(async () => {
+    const ticketId = ticketIdFrom(formData);
+    if (!ticketId) return { error: "Missing ticket." };
+
+    await runTransition(ticketId, "approveSetupMaintenance", {
+      note: "Machine setup approved by Maintenance — awaiting QA sign-off.",
+    });
+    return { success: true };
+  });
+}
+
+export async function approveSetupQa(
+  _prevState: TicketActionState,
+  formData: FormData
+): Promise<TicketActionState> {
+  return runAction(async () => {
+    const ticketId = ticketIdFrom(formData);
+    if (!ticketId) return { error: "Missing ticket." };
+
+    const user = await requireActiveUser();
+    // QA sign-off closes the ticket AND flips the machine's current mold to the
+    // setup's target product — atomically, in the same transition transaction
+    // (the changeover rolls back if the close guard fails).
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      select: {
+        targetProductId: true,
+        assets: { where: { unflaggedAt: null }, select: { assetId: true }, take: 1 },
+      },
+    });
+    const targetProductId = ticket?.targetProductId ?? null;
+    const assetId = ticket?.assets[0]?.assetId ?? null;
+
+    await runTransition(ticketId, "approveSetupQa", {
+      data: { closedAt: new Date() },
+      note: "Machine setup approved by QA — setup complete.",
+      guard:
+        targetProductId && assetId
+          ? async (tx) => {
+              await applyCurrentProduct(tx, {
+                assetId,
+                productId: targetProductId,
+                changedById: user.id,
+              });
+            }
+          : undefined,
+    });
+    return { success: true };
+  });
+}
+
+export async function rejectSetup(
+  _prevState: TicketActionState,
+  formData: FormData
+): Promise<TicketActionState> {
+  return runAction(async () => {
+    const parsed = rejectSetupSchema.safeParse({
+      ticketId: formData.get("ticketId"),
+      note: formData.get("note"),
+    });
+    if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+    await runTransition(parsed.data.ticketId, "rejectSetup", {
       data: { reopenCount: { increment: 1 } },
       note: parsed.data.note,
     });
@@ -704,6 +936,68 @@ export async function addRemark(
     await prisma.ticketRemark.create({
       data: { ticketId, userId: user.id, body, type: "WORK_LOG" },
     });
+
+    revalidatePath(`/tickets/${ticketId}`);
+    return { success: true };
+  });
+}
+
+// ── Materials log (free text; every ticket type) ──────────────────────────
+// Reuses the logPartUsed authz gate — an assignee may log/remove materials
+// only while the ticket is IN_PROGRESS.
+
+export async function logMaterial(
+  _prevState: TicketActionState,
+  formData: FormData
+): Promise<TicketActionState> {
+  return runAction(async () => {
+    const user = await requireActiveUser();
+    const parsed = logMaterialSchema.safeParse({
+      ticketId: formData.get("ticketId"),
+      name: formData.get("name"),
+      quantity: formData.get("quantity"),
+      unit: formData.get("unit"),
+    });
+    if (!parsed.success) return { error: parsed.error.issues[0].message };
+    const { ticketId, name, quantity, unit } = parsed.data;
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      include: openAssignmentsInclude,
+    });
+    if (!ticket) return { error: "Ticket not found." };
+    assertCan(user, "logPartUsed", toTicketContext(ticket));
+
+    await prisma.ticketMaterialLog.create({
+      data: { ticketId, name, quantity, unit: unit ?? null, loggedById: user.id },
+    });
+
+    revalidatePath(`/tickets/${ticketId}`);
+    return { success: true };
+  });
+}
+
+export async function removeMaterial(
+  _prevState: TicketActionState,
+  formData: FormData
+): Promise<TicketActionState> {
+  return runAction(async () => {
+    const user = await requireActiveUser();
+    const parsed = removeMaterialSchema.safeParse({
+      ticketId: formData.get("ticketId"),
+      materialId: formData.get("materialId"),
+    });
+    if (!parsed.success) return { error: parsed.error.issues[0].message };
+    const { ticketId, materialId } = parsed.data;
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      include: openAssignmentsInclude,
+    });
+    if (!ticket) return { error: "Ticket not found." };
+    assertCan(user, "logPartUsed", toTicketContext(ticket));
+
+    await prisma.ticketMaterialLog.deleteMany({ where: { id: materialId, ticketId } });
 
     revalidatePath(`/tickets/${ticketId}`);
     return { success: true };

@@ -22,6 +22,17 @@ enum AccountStatus {
   DISABLED
 }
 
+// Organizational department. Gates who may raise which ticket type and who
+// may approve Machine-Setup tickets (Maintenance vs QA). Kept as an enum so
+// authorization can rely on it — was previously free-text `String?`.
+enum Department {
+  PRODUCTION
+  MAINTENANCE
+  QUALITY_ASSURANCE
+  WAREHOUSE
+  ADMINISTRATION
+}
+
 enum TicketStatus {
   OPEN
   ASSIGNED
@@ -29,9 +40,19 @@ enum TicketStatus {
   ON_HOLD
   PENDING_VERIFICATION
   PENDING_SUPERVISOR_REVIEW
+  PENDING_MAINTENANCE_APPROVAL // Machine-Setup: awaiting Maintenance head/supervisor sign-off
+  PENDING_QA_APPROVAL // Machine-Setup: awaiting QA head/supervisor sign-off
   REOPENED
   CLOSED
   CANCELLED
+}
+
+// The kind of work a ticket represents (distinct from TicketSource, which is
+// origin). Drives creation gating, completion flow, and per-type UI.
+enum TicketType {
+  MAINTENANCE // unplanned repair/correction — the only type non-Maintenance staff may raise
+  PREVENTIVE_MAINTENANCE // scheduled servicing with a per-machine checklist
+  MACHINE_SETUP // mold change from a Production Plan; sequential Maintenance→QA approval
 }
 
 enum TicketPriority {
@@ -79,13 +100,22 @@ enum ScheduleFrequencyType {
   USAGE // e.g. every 500 operating hours
 }
 
+// Lifecycle of a Production Plan. Prepared as DRAFT, submitted for approval,
+// then APPROVED by any one designated approver (which freezes each row's
+// "initial request" and lets Maintenance create Machine-Setup tickets).
+enum ProductionPlanStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+}
+
 model User {
   id         String        @id // = auth.users.id; supplied by the mirror trigger, never generated here
   email      String        @unique
   name       String // prefilled from Google metadata by the mirror trigger
   role       UserRole? // NULL until an admin approves and assigns one
   status     AccountStatus @default(PENDING_PROFILE)
-  department String?
+  department Department?
   position   String?
   avatarUrl  String?
   isActive   Boolean       @default(false) // kept in sync with status; true only when ACTIVE
@@ -99,10 +129,16 @@ model User {
   assignmentsHeld   TicketAssignment[]    @relation("AssignedTechnician")
   solutionsAuthored Solution[]
   partsLogged       TicketPart[]
+  materialsLogged   TicketMaterialLog[]
+  checklistChecked  TicketChecklistResult[]
   downtimeLogged    DowntimeLog[]
   usageReadings     AssetUsageLog[]
   productChanges    ProductChangeLog[]
   assetFlagsGiven   TicketAsset[]
+  plansPrepared     ProductionPlan[]          @relation("PlanPreparedBy")
+  plansApproved     ProductionPlan[]          @relation("PlanApprovedBy")
+  planRowChanges    ProductionPlanRowChange[]
+  planApprovership  ProductionPlanApprover?
 
   @@index([status])
 }
@@ -118,8 +154,10 @@ model Product {
   updatedAt   DateTime @updatedAt
 
   capabilities    AssetProduct[]
-  currentOnAssets Asset[]            @relation("CurrentProduct")
+  currentOnAssets Asset[]             @relation("CurrentProduct")
   changeLogs      ProductChangeLog[]
+  planRows        ProductionPlanRow[]
+  setupTickets    Ticket[]            @relation("TicketTargetProduct")
 }
 
 // An asset's capability list — which products it *can* run, independent
@@ -192,17 +230,19 @@ model Asset {
   commissionedAt    DateTime?
   warrantyExpiresAt DateTime?
   retiredAt         DateTime?
-  parentAssetId     String?
-  currentProductId  String?
-  notes             String?
-  createdAt         DateTime   @default(now())
-  updatedAt         DateTime   @updatedAt
+  parentAssetId          String?
+  currentProductId       String?
+  pmChecklistTemplateId  String? // default PM checklist snapshotted onto new PM tickets
+  notes                  String?
+  createdAt              DateTime   @default(now())
+  updatedAt              DateTime   @updatedAt
 
-  category       AssetCategory @relation(fields: [categoryId], references: [id])
-  type           AssetType?    @relation(fields: [typeId], references: [id])
-  parentAsset    Asset?        @relation("AssetParent", fields: [parentAssetId], references: [id])
-  childAssets    Asset[]       @relation("AssetParent")
-  currentProduct Product?      @relation("CurrentProduct", fields: [currentProductId], references: [id])
+  category          AssetCategory        @relation(fields: [categoryId], references: [id])
+  type              AssetType?           @relation(fields: [typeId], references: [id])
+  parentAsset       Asset?               @relation("AssetParent", fields: [parentAssetId], references: [id])
+  childAssets       Asset[]              @relation("AssetParent")
+  currentProduct    Product?             @relation("CurrentProduct", fields: [currentProductId], references: [id])
+  pmChecklistTemplate PmChecklistTemplate? @relation(fields: [pmChecklistTemplateId], references: [id])
 
   ticketFlags         TicketAsset[]
   solutions           Solution[]
@@ -211,11 +251,41 @@ model Asset {
   usageLogs           AssetUsageLog[]
   productCapabilities AssetProduct[]
   productChanges      ProductChangeLog[]
+  productionPlanRows  ProductionPlanRow[]
 
   @@index([categoryId])
   @@index([status])
   @@index([parentAssetId])
   @@index([currentProductId])
+  @@index([pmChecklistTemplateId])
+}
+
+// A reusable Preventive-Maintenance checklist prepared by the Maintenance
+// Head/Supervisor, attachable to one or many machines. Its items are
+// snapshotted onto a PM ticket at creation (TicketChecklistResult) so later
+// template edits never rewrite historical tickets.
+model PmChecklistTemplate {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items  PmChecklistTemplateItem[]
+  assets Asset[]
+}
+
+model PmChecklistTemplateItem {
+  id         String   @id @default(uuid())
+  templateId String
+  label      String
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  template PmChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
 }
 
 // Cumulative operating-hours readings — the data source for USAGE-based PM
@@ -284,10 +354,13 @@ model Ticket {
   suggestedSolutionId  String? // picked at creation time, if applicable
   priority             TicketPriority @default(MEDIUM)
   status               TicketStatus   @default(OPEN)
+  type                 TicketType     @default(MAINTENANCE)
   source               TicketSource   @default(MANUAL)
   scheduleId           String? // set if source = PREVENTIVE
   holdReason           HoldReason? // set while ON_HOLD, cleared on resume
   reopenCount          Int            @default(0)
+  productionPlanRowId  String? // set for MACHINE_SETUP tickets spun off a Production Plan row
+  targetProductId      String? // the mold/product to switch the machine to on QA close (MACHINE_SETUP)
 
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -304,18 +377,24 @@ model Ticket {
   problemType       ProblemType?         @relation(fields: [problemTypeId], references: [id])
   suggestedSolution Solution?            @relation(fields: [suggestedSolutionId], references: [id])
   schedule          MaintenanceSchedule? @relation(fields: [scheduleId], references: [id])
+  productionPlanRow ProductionPlanRow?   @relation(fields: [productionPlanRowId], references: [id])
+  targetProduct     Product?             @relation("TicketTargetProduct", fields: [targetProductId], references: [id])
 
   remarks       TicketRemark[]
   attachments   TicketAttachment[]
   statusHistory TicketStatusHistory[]
   assignments   TicketAssignment[]
-  assets        TicketAsset[]
-  partsUsed     TicketPart[]
-  downtimeLogs  DowntimeLog[]
+  assets           TicketAsset[]
+  partsUsed        TicketPart[]
+  materialLogs     TicketMaterialLog[]
+  checklistResults TicketChecklistResult[]
+  downtimeLogs     DowntimeLog[]
 
   @@index([status])
   @@index([status, priority])
+  @@index([type])
   @@index([createdAt])
+  @@index([productionPlanRowId])
 }
 
 // Audit trail — also the source of truth for "time spent" reporting
@@ -485,4 +564,121 @@ model TicketPart {
 
   @@index([ticketId])
   @@index([partId])
+}
+
+// Free-text log of materials / spare parts consumed on a ticket. Available on
+// every ticket type. Deliberately unstructured for now; a later phase upgrades
+// this to draw from the Part inventory (nullable partId + stock decrement).
+model TicketMaterialLog {
+  id         String   @id @default(uuid())
+  ticketId   String
+  name       String
+  quantity   String // free text, e.g. "2", "500 ml", "1 roll"
+  unit       String?
+  loggedById String
+  loggedAt   DateTime @default(now())
+
+  ticket   Ticket @relation(fields: [ticketId], references: [id])
+  loggedBy User   @relation(fields: [loggedById], references: [id])
+
+  @@index([ticketId])
+}
+
+// Per-ticket snapshot of a PM checklist, copied from the machine's template at
+// creation. A technician toggles each item done and adds a per-item remark.
+model TicketChecklistResult {
+  id          String    @id @default(uuid())
+  ticketId    String
+  label       String // snapshot of the template item's label
+  sortOrder   Int       @default(0)
+  done        Boolean   @default(false)
+  remark      String?
+  checkedById String?
+  checkedAt   DateTime?
+
+  ticket    Ticket @relation(fields: [ticketId], references: [id])
+  checkedBy User?  @relation(fields: [checkedById], references: [id])
+
+  @@index([ticketId])
+}
+
+// A Production Plan prepared by the Production team: a form-numbered document
+// with a schedule window and effective date, carrying one row per Production
+// Machine. Any one designated approver (ProductionPlanApprover) approves it,
+// which freezes each row's "initial request" (approvedSnapshot) and lets
+// Maintenance spin Machine-Setup tickets off individual rows. Post-approval
+// row edits are tracked in ProductionPlanRowChange.
+model ProductionPlan {
+  id            String               @id @default(uuid())
+  formNumber    String
+  scheduleFrom  DateTime // production schedule window start
+  scheduleTo    DateTime // production schedule window end
+  effectiveDate DateTime
+  status        ProductionPlanStatus @default(DRAFT)
+  preparedById  String
+  approvedById  String?
+  approvedAt    DateTime?
+  frozenAt      DateTime? // set at approval — when each row's approvedSnapshot was written
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  preparedBy User  @relation("PlanPreparedBy", fields: [preparedById], references: [id])
+  approvedBy User? @relation("PlanApprovedBy", fields: [approvedById], references: [id])
+
+  rows ProductionPlanRow[]
+
+  @@index([status])
+  @@index([preparedById])
+}
+
+// One row per Production Machine on a plan. `approvedSnapshot` is the frozen
+// initial request written at approval; the live columns then diverge as
+// post-approval edits are applied (each logged in ProductionPlanRowChange).
+model ProductionPlanRow {
+  id                 String   @id @default(uuid())
+  planId             String
+  assetId            String // the Production Machine this row concerns
+  statusInstruction  String // "Status" — production's instruction for the machine
+  productId          String? // Item Product to Produce — must be a capability of the asset
+  referenceCycleTime String // free text
+  remarks            String
+  sortOrder          Int      @default(0)
+  approvedSnapshot   Json? // frozen "initial request", written at approval time
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  plan    ProductionPlan            @relation(fields: [planId], references: [id], onDelete: Cascade)
+  asset   Asset                     @relation(fields: [assetId], references: [id])
+  product Product?                  @relation(fields: [productId], references: [id])
+  changes ProductionPlanRowChange[]
+  tickets Ticket[]
+
+  @@index([planId])
+  @@index([assetId])
+}
+
+// Per-row change log for edits made after a plan is approved — the audit
+// trail behind "mid-week changes tracked against the frozen initial request."
+model ProductionPlanRowChange {
+  id          String   @id @default(uuid())
+  rowId       String
+  changedById String
+  changedAt   DateTime @default(now())
+  field       String // which field changed, e.g. "statusInstruction", "productId"
+  oldValue    String?
+  newValue    String?
+
+  row       ProductionPlanRow @relation(fields: [rowId], references: [id], onDelete: Cascade)
+  changedBy User              @relation(fields: [changedById], references: [id])
+
+  @@index([rowId])
+}
+
+// The managed set of users allowed to approve Production Plans. Any one of
+// them approving a PENDING_APPROVAL plan deploys it.
+model ProductionPlanApprover {
+  userId  String   @id
+  addedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

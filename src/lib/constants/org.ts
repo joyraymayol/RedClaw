@@ -1,15 +1,29 @@
 import { z } from "zod";
 
-// Placeholder lists — replace with the real org structure from the
-// maintenance admin before employee onboarding starts. Values are stored
-// as plain strings in the DB, so editing these lists never needs a migration.
-export const DEPARTMENTS = [
-  "Production",
-  "Maintenance",
-  "Quality Assurance",
-  "Warehouse",
-  "Administration",
-] as const;
+import { Department } from "@/generated/prisma/enums";
+
+export { Department };
+
+// Display labels for the Department enum (the DB stores the enum value).
+// Editing a label never needs a migration; adding/removing a department does
+// (it's a real enum now, so authorization can rely on it).
+export const DEPARTMENT_LABELS: Record<Department, string> = {
+  PRODUCTION: "Production",
+  MAINTENANCE: "Maintenance",
+  QUALITY_ASSURANCE: "Quality Assurance",
+  WAREHOUSE: "Warehouse",
+  ADMINISTRATION: "Administration",
+};
+
+export const DEPARTMENTS = Object.keys(DEPARTMENT_LABELS) as Department[];
+
+// Map from enum value -> display label, for base-ui Select `items` props and
+// for rendering a stored department.
+export const DEPARTMENT_ITEMS: Record<string, string> = DEPARTMENT_LABELS;
+
+export function departmentLabel(d: Department | null | undefined): string {
+  return d ? DEPARTMENT_LABELS[d] : "—";
+}
 
 export const POSITIONS = [
   "Operator",
@@ -21,8 +35,7 @@ export const POSITIONS = [
   "Staff",
 ] as const;
 
-export const departmentSchema = z.enum(DEPARTMENTS);
+export const departmentSchema = z.enum(DEPARTMENTS as [Department, ...Department[]]);
 export const positionSchema = z.enum(POSITIONS);
 
-export type Department = (typeof DEPARTMENTS)[number];
 export type Position = (typeof POSITIONS)[number];

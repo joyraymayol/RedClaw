@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { TicketStatus } from "@/generated/prisma/enums";
+import { TicketStatus, TicketType } from "@/generated/prisma/enums";
 import {
   TICKET_TRANSITIONS,
   TERMINAL_STATUSES,
@@ -29,6 +29,12 @@ const EXPECTED: Record<TicketTransitionAction, TicketStatus[]> = {
   closeTicket: [TicketStatus.PENDING_SUPERVISOR_REVIEW],
   rejectReview: [TicketStatus.PENDING_SUPERVISOR_REVIEW],
   cancelTicket: [TicketStatus.OPEN, TicketStatus.ASSIGNED],
+  approveSetupMaintenance: [TicketStatus.PENDING_MAINTENANCE_APPROVAL],
+  approveSetupQa: [TicketStatus.PENDING_QA_APPROVAL],
+  rejectSetup: [
+    TicketStatus.PENDING_MAINTENANCE_APPROVAL,
+    TicketStatus.PENDING_QA_APPROVAL,
+  ],
 };
 
 describe("canTransition", () => {
@@ -56,8 +62,25 @@ describe("transitionTarget", () => {
     ["closeTicket", TicketStatus.CLOSED],
     ["rejectReview", TicketStatus.REOPENED],
     ["cancelTicket", TicketStatus.CANCELLED],
+    ["approveSetupMaintenance", TicketStatus.PENDING_QA_APPROVAL],
+    ["approveSetupQa", TicketStatus.CLOSED],
+    ["rejectSetup", TicketStatus.REOPENED],
   ] as const)("%s lands in %s", (action, to) => {
     expect(transitionTarget(action)).toBe(to);
+  });
+
+  it("resolveTicket target is type-aware", () => {
+    expect(transitionTarget("resolveTicket", TicketType.MAINTENANCE)).toBe(
+      TicketStatus.PENDING_VERIFICATION
+    );
+    expect(transitionTarget("resolveTicket", TicketType.PREVENTIVE_MAINTENANCE)).toBe(
+      TicketStatus.PENDING_SUPERVISOR_REVIEW
+    );
+    expect(transitionTarget("resolveTicket", TicketType.MACHINE_SETUP)).toBe(
+      TicketStatus.PENDING_MAINTENANCE_APPROVAL
+    );
+    // Defaults to the MAINTENANCE target when no type is given.
+    expect(transitionTarget("resolveTicket")).toBe(TicketStatus.PENDING_VERIFICATION);
   });
 });
 

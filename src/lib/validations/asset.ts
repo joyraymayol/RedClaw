@@ -10,6 +10,7 @@ export const assetSchema = z.object({
   categoryId: z.string().trim().min(1, "Choose a category"),
   typeId: optionalId(),
   parentAssetId: optionalId(),
+  pmChecklistTemplateId: optionalId(),
   location: optionalText(120),
   status: assetStatusSchema,
   serialNumber: optionalText(80),

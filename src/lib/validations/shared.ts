@@ -33,3 +33,19 @@ export const optionalDate = () =>
     (v) => (v === null || v === "" ? undefined : v),
     z.coerce.date().optional()
   );
+
+/** A required date field (DateField hidden input, `yyyy-MM-dd`). */
+export const requiredDate = (message = "Pick a date") =>
+  z.preprocess(
+    (v) => (v === null || v === "" ? undefined : v),
+    z.coerce.date({ message })
+  );
+
+/**
+ * A zod refine for a `{ from, to }` date range — both required, from <= to.
+ * Use as `.refine(isValidDateRange, { message, path: ["…To"] })` or via
+ * `dateRangeSchema` below for a standalone from/to pair.
+ */
+export function isOrderedDateRange(range: { from?: Date; to?: Date }): boolean {
+  return !range.from || !range.to || range.from <= range.to;
+}

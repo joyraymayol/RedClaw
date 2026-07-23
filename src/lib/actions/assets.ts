@@ -4,8 +4,10 @@ import { revalidatePath } from "next/cache";
 
 import { diffIds } from "@/lib/id-diff";
 import { requireRole } from "@/lib/auth";
+import { ConflictError } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { isUniqueConstraintError } from "@/lib/prisma-errors";
+import { applyCurrentProduct } from "@/lib/product-changeover";
 import { assetSchema } from "@/lib/validations/asset";
 import { productCapabilitiesSchema, setCurrentProductSchema } from "@/lib/validations/product";
 
@@ -17,12 +19,15 @@ export type AssetActionState = {
 function parseAssetForm(formData: FormData) {
   const typeId = formData.get("typeId");
   const parentAssetId = formData.get("parentAssetId");
+  const pmChecklistTemplateId = formData.get("pmChecklistTemplateId");
   return assetSchema.safeParse({
     assetCode: formData.get("assetCode"),
     name: formData.get("name"),
     categoryId: formData.get("categoryId"),
     typeId: typeId === "__none__" ? "" : typeId,
     parentAssetId: parentAssetId === "__none__" ? "" : parentAssetId,
+    pmChecklistTemplateId:
+      pmChecklistTemplateId === "__none__" ? "" : pmChecklistTemplateId,
     location: formData.get("location"),
     status: formData.get("status"),
     serialNumber: formData.get("serialNumber"),
@@ -187,33 +192,15 @@ export async function setCurrentProduct(
   if (!parsed.success) return { error: parsed.error.issues[0].message };
   const { assetId, productId } = parsed.data;
 
-  const asset = await prisma.asset.findUnique({
-    where: { id: assetId },
-    include: {
-      category: { select: { tracksProducts: true } },
-      productCapabilities: true,
-    },
-  });
-  if (!asset) return { error: "Asset not found." };
-  if (!asset.category.tracksProducts) {
-    return { error: "This asset's category doesn't track products." };
+  try {
+    const changed = await prisma.$transaction((tx) =>
+      applyCurrentProduct(tx, { assetId, productId, changedById: user.id })
+    );
+    if (!changed) return { error: "Already set to that product." };
+  } catch (e) {
+    if (e instanceof ConflictError) return { error: e.message };
+    throw e;
   }
-  if (asset.status === "RETIRED") {
-    return { error: "Retired assets can't have a product changeover." };
-  }
-  if (productId && !asset.productCapabilities.some((c) => c.productId === productId)) {
-    return { error: "Choose a product this asset is capable of running." };
-  }
-  if (productId === asset.currentProductId) {
-    return { error: "Already set to that product." };
-  }
-
-  await prisma.$transaction([
-    prisma.asset.update({ where: { id: assetId }, data: { currentProductId: productId } }),
-    prisma.productChangeLog.create({
-      data: { assetId, productId, changedById: user.id },
-    }),
-  ]);
 
   revalidatePath(`/assets/${assetId}`);
   return { success: true };

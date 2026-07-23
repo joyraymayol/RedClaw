@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { updateTicketAssets, type TicketActionState } from "@/lib/actions/tickets";
 
 type AssetOption = { id: string; assetCode: string; name: string; categoryId: string; categoryName: string };
@@ -92,28 +93,30 @@ export function TicketFlagDialog({
             {[...selected].map((id) => (
               <input key={id} type="hidden" name="assetIds" value={id} />
             ))}
-            <div className="max-h-72 space-y-3 overflow-y-auto rounded-md border p-2">
-              {groups.length === 0 && (
-                <p className="p-2 text-sm text-muted-foreground">No non-retired assets available.</p>
-              )}
-              {groups.map((group) => (
-                <div key={group.categoryName} className="space-y-1">
-                  <Label className="px-2 text-xs text-muted-foreground">{group.categoryName}</Label>
-                  {group.assets.map((a) => (
-                    <label
-                      key={a.id}
-                      className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted"
-                    >
-                      <Checkbox
-                        checked={selected.has(a.id)}
-                        onCheckedChange={(checked) => toggle(a.id, checked === true)}
-                      />
-                      {a.assetCode} — {a.name}
-                    </label>
-                  ))}
-                </div>
-              ))}
-            </div>
+            <ScrollArea className="max-h-72 rounded-md border">
+              <div className="space-y-3 p-2 pr-3">
+                {groups.length === 0 && (
+                  <p className="p-2 text-sm text-muted-foreground">No non-retired assets available.</p>
+                )}
+                {groups.map((group) => (
+                  <div key={group.categoryName} className="space-y-1">
+                    <Label className="px-2 text-xs text-muted-foreground">{group.categoryName}</Label>
+                    {group.assets.map((a) => (
+                      <label
+                        key={a.id}
+                        className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted"
+                      >
+                        <Checkbox
+                          checked={selected.has(a.id)}
+                          onCheckedChange={(checked) => toggle(a.id, checked === true)}
+                        />
+                        {a.assetCode} — {a.name}
+                      </label>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
             <DialogFooter>
               <DialogClose render={<Button variant="outline" type="button" />}>
                 Cancel
@@ -122,15 +125,15 @@ export function TicketFlagDialog({
                 {pending ? "Saving…" : "Save assets"}
               </Button>
             </DialogFooter>
+            {error && (
+              <p
+                role="alert"
+                className="rounded-md border border-destructive/30 bg-destructive/5 p-2.5 text-xs text-destructive"
+              >
+                {error}
+              </p>
+            )}
           </form>
-          {error && (
-            <p
-              role="alert"
-              className="rounded-md border border-destructive/30 bg-destructive/5 p-2.5 text-xs text-destructive"
-            >
-              {error}
-            </p>
-          )}
         </DialogContent>
       </Dialog>
     </>

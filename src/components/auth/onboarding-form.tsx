@@ -21,7 +21,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { completeProfile, type ProfileFormState } from "@/lib/actions/profile";
-import { DEPARTMENTS, POSITIONS } from "@/lib/constants/org";
+import {
+  DEPARTMENT_ITEMS,
+  DEPARTMENT_LABELS,
+  DEPARTMENTS,
+  POSITIONS,
+} from "@/lib/constants/org";
 
 export function OnboardingForm({ defaultName }: { defaultName: string }) {
   const [state, formAction, pending] = useActionState<
@@ -54,14 +59,14 @@ export function OnboardingForm({ defaultName }: { defaultName: string }) {
           </div>
           <div className="space-y-2">
             <Label htmlFor="department">Department</Label>
-            <Select name="department" required>
+            <Select name="department" items={DEPARTMENT_ITEMS} required>
               <SelectTrigger id="department" className="w-full">
                 <SelectValue placeholder="Select your department" />
               </SelectTrigger>
               <SelectContent>
                 {DEPARTMENTS.map((d) => (
                   <SelectItem key={d} value={d}>
-                    {d}
+                    {DEPARTMENT_LABELS[d]}
                   </SelectItem>
                 ))}
               </SelectContent>

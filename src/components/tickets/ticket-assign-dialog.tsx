@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { assignTicket, updateAssignees, type TicketActionState } from "@/lib/actions/tickets";
 
 type TechnicianOption = { id: string; name: string };
@@ -93,23 +94,25 @@ export function TicketAssignDialog({
             ))}
             <div className="space-y-2">
               <Label>Technicians</Label>
-              <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border p-2">
-                {technicians.length === 0 && (
-                  <p className="p-2 text-sm text-muted-foreground">No active technicians.</p>
-                )}
-                {technicians.map((t) => (
-                  <label
-                    key={t.id}
-                    className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted"
-                  >
-                    <Checkbox
-                      checked={selected.has(t.id)}
-                      onCheckedChange={(checked) => toggle(t.id, checked)}
-                    />
-                    {t.name}
-                  </label>
-                ))}
-              </div>
+              <ScrollArea className="max-h-64 rounded-md border">
+                <div className="space-y-1 p-2 pr-3">
+                  {technicians.length === 0 && (
+                    <p className="p-2 text-sm text-muted-foreground">No active technicians.</p>
+                  )}
+                  {technicians.map((t) => (
+                    <label
+                      key={t.id}
+                      className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted"
+                    >
+                      <Checkbox
+                        checked={selected.has(t.id)}
+                        onCheckedChange={(checked) => toggle(t.id, checked)}
+                      />
+                      {t.name}
+                    </label>
+                  ))}
+                </div>
+              </ScrollArea>
             </div>
             <DialogFooter>
               <DialogClose render={<Button variant="outline" type="button" />}>
@@ -119,15 +122,15 @@ export function TicketAssignDialog({
                 {pending ? "Saving…" : isManage ? "Save team" : "Assign"}
               </Button>
             </DialogFooter>
+            {error && (
+              <p
+                role="alert"
+                className="rounded-md border border-destructive/30 bg-destructive/5 p-2.5 text-xs text-destructive"
+              >
+                {error}
+              </p>
+            )}
           </form>
-          {error && (
-            <p
-              role="alert"
-              className="rounded-md border border-destructive/30 bg-destructive/5 p-2.5 text-xs text-destructive"
-            >
-              {error}
-            </p>
-          )}
         </DialogContent>
       </Dialog>
     </>

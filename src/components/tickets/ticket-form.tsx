@@ -14,8 +14,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { TICKET_TYPE_LABELS } from "@/components/tickets/ticket-type-badge";
 import { createTicket, type TicketActionState } from "@/lib/actions/tickets";
-import type { TicketPriority } from "@/generated/prisma/enums";
+import type { TicketPriority, TicketType } from "@/generated/prisma/enums";
 
 const PRIORITIES: TicketPriority[] = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
 
@@ -58,25 +59,42 @@ export function TicketForm({
   assets,
   problemTypes,
   solutions,
+  allowedTypes,
+  productsByAsset,
 }: {
   categories: CategoryOption[];
   assets: AssetOption[];
   problemTypes: ProblemTypeOption[];
   solutions: SolutionOption[];
+  /** Ticket types this user is allowed to raise (from canCreateTicketType). */
+  allowedTypes: TicketType[];
+  /** Per-asset product capabilities — for the MACHINE_SETUP target-mold picker. */
+  productsByAsset: Record<string, { id: string; name: string }[]>;
 }) {
   const [state, formAction, pending] = useActionState<TicketActionState, FormData>(
     createTicket,
     initialState
   );
+  const [type, setType] = useState<TicketType>(allowedTypes[0] ?? "MAINTENANCE");
   const [categoryId, setCategoryId] = useState("");
   const [assetId, setAssetId] = useState("");
   const [problemTypeId, setProblemTypeId] = useState("");
   const [solutionId, setSolutionId] = useState("");
+  const [targetProductId, setTargetProductId] = useState("");
   const [priority, setPriority] = useState<TicketPriority | "">("MEDIUM");
 
   const assetsInCategory = useMemo(
     () => assets.filter((a) => a.categoryId === categoryId),
     [assets, categoryId]
+  );
+
+  const targetProducts = useMemo(
+    () => (assetId ? productsByAsset[assetId] ?? [] : []),
+    [productsByAsset, assetId]
+  );
+  const targetProductItems = useMemo(
+    () => Object.fromEntries(targetProducts.map((p) => [p.id, p.name])),
+    [targetProducts]
   );
 
   const matchingSolutions = useMemo(() => {
@@ -102,6 +120,10 @@ export function TicketForm({
     () => Object.fromEntries(problemTypes.map((pt) => [pt.id, pt.name])),
     [problemTypes]
   );
+  const typeItems = useMemo(
+    () => Object.fromEntries(allowedTypes.map((t) => [t, TICKET_TYPE_LABELS[t]])),
+    [allowedTypes]
+  );
   const solutionItems = useMemo(
     () =>
       Object.fromEntries(
@@ -117,6 +139,32 @@ export function TicketForm({
     <>
       {/* suppressHydrationWarning: Chrome iOS injects __gcruniqueid into forms */}
       <form action={formAction} className="space-y-5" suppressHydrationWarning>
+        {allowedTypes.length > 1 ? (
+          <div className="space-y-2">
+            <Label htmlFor="type">Ticket type</Label>
+            <Select
+              name="type"
+              items={typeItems}
+              value={type}
+              onValueChange={(v) => setType((v as TicketType) ?? "MAINTENANCE")}
+              required
+            >
+              <SelectTrigger id="type" className="w-full">
+                <SelectValue placeholder="Choose a ticket type" />
+              </SelectTrigger>
+              <SelectContent>
+                {allowedTypes.map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {TICKET_TYPE_LABELS[t]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        ) : (
+          <input type="hidden" name="type" value={type} />
+        )}
+
         <div className="grid grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label htmlFor="categoryId">Category</Label>
@@ -129,6 +177,7 @@ export function TicketForm({
                   const next = v ?? "";
                   setCategoryId(next);
                   setAssetId("");
+                  setTargetProductId("");
                 }}
                 required
               >
@@ -149,6 +198,7 @@ export function TicketForm({
                   onClear={() => {
                     setCategoryId("");
                     setAssetId("");
+                    setTargetProductId("");
                   }}
                 />
               )}
@@ -161,7 +211,10 @@ export function TicketForm({
                 name="assetId"
                 items={assetItems}
                 value={assetId}
-                onValueChange={(v) => setAssetId(v ?? "")}
+                onValueChange={(v) => {
+                  setAssetId(v ?? "");
+                  setTargetProductId("");
+                }}
                 disabled={!categoryId}
                 required
               >
@@ -177,48 +230,94 @@ export function TicketForm({
                 </SelectContent>
               </Select>
               {assetId && (
-                <ClearSelectButton label="asset" onClear={() => setAssetId("")} />
+                <ClearSelectButton
+                  label="asset"
+                  onClear={() => {
+                    setAssetId("");
+                    setTargetProductId("");
+                  }}
+                />
               )}
             </div>
           </div>
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="problemTypeId">Problem type</Label>
-          <div className="relative">
-            <Select
-              name="problemTypeId"
-              items={problemTypeItems}
-              value={problemTypeId}
-              onValueChange={(v) => {
-                setProblemTypeId(v ?? "");
-                setSolutionId("");
-              }}
-            >
-              <SelectTrigger id="problemTypeId" className="w-full">
-                <SelectValue placeholder="Optional — helps route the ticket" />
-              </SelectTrigger>
-              <SelectContent>
-                {problemTypes.map((pt) => (
-                  <SelectItem key={pt.id} value={pt.id}>
-                    {pt.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {problemTypeId && (
-              <ClearSelectButton
-                label="problem type"
-                onClear={() => {
-                  setProblemTypeId("");
+        {type === "MACHINE_SETUP" && assetId && (
+          <div className="space-y-2">
+            <Label htmlFor="targetProductId">Target product (mold)</Label>
+            <div className="relative">
+              <Select
+                name="targetProductId"
+                items={targetProductItems}
+                value={targetProductId}
+                onValueChange={(v) => setTargetProductId(v ?? "")}
+                disabled={targetProducts.length === 0}
+              >
+                <SelectTrigger id="targetProductId" className="w-full">
+                  <SelectValue
+                    placeholder={
+                      targetProducts.length === 0
+                        ? "This machine has no product capabilities"
+                        : "Optional — the mold to switch to on completion"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {targetProducts.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {targetProductId && (
+                <ClearSelectButton
+                  label="target product"
+                  onClear={() => setTargetProductId("")}
+                />
+              )}
+            </div>
+          </div>
+        )}
+
+        {type === "MAINTENANCE" && (
+          <div className="space-y-2">
+            <Label htmlFor="problemTypeId">Problem type</Label>
+            <div className="relative">
+              <Select
+                name="problemTypeId"
+                items={problemTypeItems}
+                value={problemTypeId}
+                onValueChange={(v) => {
+                  setProblemTypeId(v ?? "");
                   setSolutionId("");
                 }}
-              />
-            )}
+              >
+                <SelectTrigger id="problemTypeId" className="w-full">
+                  <SelectValue placeholder="Optional — helps route the ticket" />
+                </SelectTrigger>
+                <SelectContent>
+                  {problemTypes.map((pt) => (
+                    <SelectItem key={pt.id} value={pt.id}>
+                      {pt.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {problemTypeId && (
+                <ClearSelectButton
+                  label="problem type"
+                  onClear={() => {
+                    setProblemTypeId("");
+                    setSolutionId("");
+                  }}
+                />
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
-        {matchingSolutions.length > 0 && (
+        {type === "MAINTENANCE" && matchingSolutions.length > 0 && (
           <div className="space-y-2">
             <Label htmlFor="suggestedSolutionId">Suggested solution</Label>
             <div className="relative">

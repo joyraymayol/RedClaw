@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -26,6 +27,7 @@ import {
   updateProductCapabilities,
   type AssetActionState,
 } from "@/lib/actions/assets";
+import { formatDateTimeParts } from "@/lib/format";
 
 type ProductOption = { id: string; name: string };
 type ChangeLogEntry = {
@@ -98,25 +100,27 @@ function CapabilitiesDialog({
             {[...selected].map((id) => (
               <input key={id} type="hidden" name="productIds" value={id} />
             ))}
-            <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border p-2">
-              {allProducts.length === 0 && (
-                <p className="p-2 text-sm text-muted-foreground">
-                  No products yet — add some in Asset settings.
-                </p>
-              )}
-              {allProducts.map((p) => (
-                <label
-                  key={p.id}
-                  className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted"
-                >
-                  <Checkbox
-                    checked={selected.has(p.id)}
-                    onCheckedChange={(checked) => toggle(p.id, checked === true)}
-                  />
-                  {p.name}
-                </label>
-              ))}
-            </div>
+            <ScrollArea className="max-h-64 rounded-md border">
+              <div className="space-y-1 p-2 pr-3">
+                {allProducts.length === 0 && (
+                  <p className="p-2 text-sm text-muted-foreground">
+                    No products yet — add some in Asset settings.
+                  </p>
+                )}
+                {allProducts.map((p) => (
+                  <label
+                    key={p.id}
+                    className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted"
+                  >
+                    <Checkbox
+                      checked={selected.has(p.id)}
+                      onCheckedChange={(checked) => toggle(p.id, checked === true)}
+                    />
+                    {p.name}
+                  </label>
+                ))}
+              </div>
+            </ScrollArea>
             <DialogFooter>
               <DialogClose render={<Button variant="outline" type="button" />}>
                 Cancel
@@ -125,15 +129,15 @@ function CapabilitiesDialog({
                 {pending ? "Saving…" : "Save capabilities"}
               </Button>
             </DialogFooter>
+            {error && (
+              <p
+                role="alert"
+                className="rounded-md border border-destructive/30 bg-destructive/5 p-2.5 text-xs text-destructive"
+              >
+                {error}
+              </p>
+            )}
           </form>
-          {error && (
-            <p
-              role="alert"
-              className="rounded-md border border-destructive/30 bg-destructive/5 p-2.5 text-xs text-destructive"
-            >
-              {error}
-            </p>
-          )}
         </DialogContent>
       </Dialog>
     </>
@@ -169,11 +173,11 @@ function SetCurrentProductForm({
 
   return (
     <div className="space-y-2">
+      <Label htmlFor="productId">Current product</Label>
       {/* suppressHydrationWarning: Chrome iOS injects __gcruniqueid into forms */}
-      <form action={submit} className="flex items-end gap-2" suppressHydrationWarning>
+      <form action={submit} className="flex items-center gap-2" suppressHydrationWarning>
         <input type="hidden" name="assetId" value={assetId} />
-        <div className="flex-1 space-y-2">
-          <Label htmlFor="productId">Current product</Label>
+        <div className="flex-1">
           <Select
             name="productId"
             items={items}
@@ -277,16 +281,14 @@ export function AssetProductsCard({
         <div className="space-y-1.5 border-t pt-3">
           <h3 className="text-xs font-medium text-muted-foreground">Changeover history</h3>
           <ul className="space-y-1 text-xs text-muted-foreground">
-            {changeLogs.map((log) => (
-              <li key={log.id}>
-                {log.productName ?? "Cleared"} — {log.changedByName},{" "}
-                {log.changedAt.toLocaleDateString("en-PH", {
-                  year: "numeric",
-                  month: "short",
-                  day: "numeric",
-                })}
-              </li>
-            ))}
+            {changeLogs.map((log) => {
+              const ts = formatDateTimeParts(log.changedAt);
+              return (
+                <li key={log.id}>
+                  {log.productName ?? "Cleared"} — {log.changedByName}, {ts.date}, {ts.time}
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

@@ -11,6 +11,8 @@ const STATUS_BADGE: Record<
   ON_HOLD: { label: "On hold", variant: "secondary" },
   PENDING_VERIFICATION: { label: "Pending verification", variant: "secondary" },
   PENDING_SUPERVISOR_REVIEW: { label: "Pending review", variant: "secondary" },
+  PENDING_MAINTENANCE_APPROVAL: { label: "Pending maintenance sign-off", variant: "secondary" },
+  PENDING_QA_APPROVAL: { label: "Pending QA sign-off", variant: "secondary" },
   REOPENED: { label: "Reopened", variant: "destructive" },
   CLOSED: { label: "Closed", variant: "secondary" },
   CANCELLED: { label: "Cancelled", variant: "outline" },

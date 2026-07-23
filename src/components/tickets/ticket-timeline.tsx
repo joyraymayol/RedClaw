@@ -1,5 +1,6 @@
 import { TicketStatusBadge } from "@/components/tickets/ticket-status-badge";
 import type { TicketStatus } from "@/generated/prisma/enums";
+import { formatDateTime } from "@/lib/format";
 
 type TimelineEntry = {
   id: string;
@@ -36,13 +37,7 @@ export function TicketTimeline({ history }: { history: TimelineEntry[] }) {
               <p className="mt-0.5 text-muted-foreground">{h.note}</p>
             )}
             <p className="mt-0.5 text-xs text-muted-foreground/70">
-              {h.createdAt.toLocaleString("en-PH", {
-                year: "numeric",
-                month: "short",
-                day: "numeric",
-                hour: "numeric",
-                minute: "2-digit",
-              })}
+              {formatDateTime(h.createdAt)}
             </p>
           </div>
         </li>

@@ -21,7 +21,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { assignRole, disableUser } from "@/lib/actions/admin";
-import type { AccountStatus, UserRole } from "@/generated/prisma/enums";
+import { departmentLabel } from "@/lib/constants/org";
+import { formatDateTimeParts } from "@/lib/format";
+import type { AccountStatus, Department, UserRole } from "@/generated/prisma/enums";
 
 const ROLES: UserRole[] = [
   "REQUESTER",
@@ -35,7 +37,7 @@ type RowUser = {
   id: string;
   name: string;
   email: string;
-  department: string | null;
+  department: Department | null;
   position: string | null;
   status: AccountStatus;
   role: UserRole | null;
@@ -112,7 +114,7 @@ export function UserActionsDialog({
             </div>
             <div className="flex justify-between gap-4">
               <dt className="text-muted-foreground">Department</dt>
-              <dd className="font-medium">{user.department ?? "—"}</dd>
+              <dd className="font-medium">{departmentLabel(user.department)}</dd>
             </div>
             <div className="flex justify-between gap-4">
               <dt className="text-muted-foreground">Position</dt>
@@ -121,11 +123,10 @@ export function UserActionsDialog({
             <div className="flex justify-between gap-4">
               <dt className="text-muted-foreground">Joined</dt>
               <dd className="font-medium">
-                {user.createdAt.toLocaleDateString("en-PH", {
-                  year: "numeric",
-                  month: "short",
-                  day: "numeric",
-                })}
+                {(() => {
+                  const ts = formatDateTimeParts(user.createdAt);
+                  return `${ts.date}, ${ts.time}`;
+                })()}
               </dd>
             </div>
           </dl>

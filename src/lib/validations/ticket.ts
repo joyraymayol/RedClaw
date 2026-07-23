@@ -4,16 +4,40 @@ import { optionalId, optionalText } from "@/lib/validations/shared";
 
 // Attachments (private-bucket upload) are deferred — see plan §5/§9.
 
+export const ticketTypeSchema = z
+  .enum(["MAINTENANCE", "PREVENTIVE_MAINTENANCE", "MACHINE_SETUP"])
+  .default("MAINTENANCE");
+
 export const newTicketSchema = z.object({
+  type: ticketTypeSchema,
   assetId: z.string().min(1, "Select an asset"),
   problemTypeId: optionalId(),
   suggestedSolutionId: optionalId(),
+  // MACHINE_SETUP only: the mold/product to switch the machine to on QA close.
+  targetProductId: optionalId(),
   priority: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]),
   title: z.string().trim().min(5, "Give a short summary").max(120),
   description: z.string().trim().min(10, "Add a bit more detail").max(4000),
 });
 
 export type NewTicketInput = z.infer<typeof newTicketSchema>;
+
+export const rejectSetupSchema = z.object({
+  ticketId: z.string().min(1),
+  note: z.string().trim().min(1, "Say why this is going back").max(500),
+});
+
+export const logMaterialSchema = z.object({
+  ticketId: z.string().min(1),
+  name: z.string().trim().min(1, "Name the material").max(160),
+  quantity: z.string().trim().min(1, "How much was used?").max(60),
+  unit: optionalText(40),
+});
+
+export const removeMaterialSchema = z.object({
+  ticketId: z.string().min(1),
+  materialId: z.string().min(1),
+});
 
 export const remarkSchema = z.object({
   ticketId: z.string().min(1),

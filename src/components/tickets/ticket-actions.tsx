@@ -16,10 +16,13 @@ import { TicketHoldDialog } from "@/components/tickets/ticket-hold-dialog";
 import { TicketNoteDialog } from "@/components/tickets/ticket-note-dialog";
 import { can, type Actor, type TicketContext } from "@/lib/authz";
 import {
+  approveSetupMaintenance,
+  approveSetupQa,
   cancelTicket,
   closeTicket,
   escalateVerification,
   rejectReview,
+  rejectSetup,
   reopenTicket,
   resolveTicket,
   resumeTicket,
@@ -182,6 +185,46 @@ export function TicketActions({
         title="Send back for more work"
         description="Explain what still needs fixing before this can close."
         notePlaceholder="QA found the guard is still loose…"
+        submitLabel="Send back"
+      />
+    );
+  }
+  if (can(actor, "approveSetupMaintenance", ticket).allowed) {
+    buttons.push(
+      <SimpleActionButton
+        key="approveSetupMaintenance"
+        action={approveSetupMaintenance}
+        ticketId={ticket.id}
+        label="Approve (Maintenance)"
+        pendingLabel="Approving…"
+        icon={<CheckIcon className="size-4" />}
+      />
+    );
+  }
+  if (can(actor, "approveSetupQa", ticket).allowed) {
+    buttons.push(
+      <SimpleActionButton
+        key="approveSetupQa"
+        action={approveSetupQa}
+        ticketId={ticket.id}
+        label="Approve (QA)"
+        pendingLabel="Approving…"
+        icon={<CheckIcon className="size-4" />}
+      />
+    );
+  }
+  if (can(actor, "rejectSetup", ticket).allowed) {
+    buttons.push(
+      <TicketNoteDialog
+        key="rejectSetup"
+        action={rejectSetup}
+        ticketId={ticket.id}
+        triggerLabel="Send back to technician"
+        triggerIcon={<RotateCcwIcon className="size-4" />}
+        triggerVariant="outline"
+        title="Send this machine setup back"
+        description="Explain what still needs doing before this setup can be approved."
+        notePlaceholder="Mold alignment is off — re-seat and re-check…"
         submitLabel="Send back"
       />
     );
