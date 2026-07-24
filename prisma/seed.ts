@@ -13,6 +13,7 @@ import { config as loadEnv } from "dotenv";
 import { PrismaPg } from "@prisma/adapter-pg";
 
 import { PrismaClient } from "../src/generated/prisma/client";
+import type { NotificationType } from "../src/generated/prisma/enums";
 
 loadEnv({ path: [".env.local", ".env"] });
 
@@ -407,6 +408,89 @@ async function seedProductionPlans() {
   }
 }
 
+// A handful of sample notifications across the department test users so the
+// bell/inbox aren't empty on a fresh DB. Keyed off the TEST_USERS set (the
+// only accounts this seed can guarantee exist) — skipped per-user if that
+// account hasn't signed in yet, and skipped entirely once any of them already
+// has a notification (no natural unique key to upsert on, so re-running the
+// seed after that point is a no-op rather than piling up duplicates).
+const NOTIFICATION_SAMPLES: {
+  email: string;
+  type: NotificationType;
+  title: string;
+  body?: string;
+  linkPath?: string;
+  read?: boolean;
+}[] = [
+  {
+    email: "maint.head.test@example.com",
+    type: "SETUP_MAINTENANCE_APPROVAL",
+    title: "A machine setup needs Maintenance approval",
+    body: "Sample seed notification — open Tickets to see live ones.",
+    linkPath: "/tickets",
+  },
+  {
+    email: "qa.sup.test@example.com",
+    type: "SETUP_QA_APPROVAL",
+    title: "A machine setup needs QA approval",
+    body: "Sample seed notification — open Tickets to see live ones.",
+    linkPath: "/tickets",
+    read: true,
+  },
+  {
+    email: "prod.head.test@example.com",
+    type: "PLAN_APPROVAL_REQUESTED",
+    title: "Plan PP-2026-001 needs approval",
+    linkPath: "/production-plans",
+  },
+  {
+    email: "prod.staff.test@example.com",
+    type: "PLAN_APPROVED",
+    title: "Plan PP-2026-002 approved",
+    linkPath: "/production-plans",
+    read: true,
+  },
+];
+
+async function seedNotifications() {
+  const recipients = await prisma.user.findMany({
+    where: { email: { in: NOTIFICATION_SAMPLES.map((s) => s.email) }, status: "ACTIVE" },
+    select: { id: true, email: true },
+  });
+  if (recipients.length === 0) {
+    console.warn("  · Notifications skipped — no ACTIVE test users to notify yet.");
+    return;
+  }
+
+  const already = await prisma.notification.findFirst({
+    where: { userId: { in: recipients.map((r) => r.id) } },
+    select: { id: true },
+  });
+  if (already) {
+    console.log("✓ Sample notifications already present — skipping");
+    return;
+  }
+
+  const idByEmail = new Map(recipients.map((r) => [r.email, r.id]));
+  let count = 0;
+  for (const s of NOTIFICATION_SAMPLES) {
+    const userId = idByEmail.get(s.email);
+    if (!userId) continue;
+    await prisma.notification.create({
+      data: {
+        userId,
+        type: s.type,
+        title: s.title,
+        body: s.body ?? null,
+        linkPath: s.linkPath ?? null,
+        readAt: s.read ? new Date() : null,
+      },
+    });
+    count += 1;
+  }
+  console.log(`✓ ${count} sample notifications seeded`);
+}
+
 async function main() {
   await bootstrapAdmins();
   await seedStarterData();
@@ -414,6 +498,7 @@ async function main() {
   await seedAssetProductCapabilities();
   await seedPmChecklistTemplates();
   await seedProductionPlans();
+  await seedNotifications();
 }
 
 main()

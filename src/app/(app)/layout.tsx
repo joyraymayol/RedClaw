@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { Logo } from "@/components/logo";
+import { NotificationBell } from "@/components/layout/notification-bell";
 import { SignOutButton } from "@/components/layout/sign-out-button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import {
@@ -67,6 +68,7 @@ export default async function AppLayout({
               <span className="hidden text-sm text-muted-foreground lg:inline">
                 {user.name}
               </span>
+              <NotificationBell userId={user.id} />
               <SignOutButton />
               <ThemeToggle />
             </div>

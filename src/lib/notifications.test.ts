@@ -14,6 +14,7 @@ import {
   notifyUsers,
   planApprovers,
   qaLeads,
+  supervisors,
 } from "@/lib/notifications";
 
 function makeTx() {
@@ -130,6 +131,14 @@ describe("recipient resolvers", () => {
     expect(ids).toEqual(["p1", "p2"]);
     expect(h.approverFindMany.mock.calls[0][0].where).toEqual({
       user: { status: "ACTIVE" },
+    });
+  });
+
+  it("supervisors matches SUPERVISOR/HEAD, department-agnostic, no ADMIN bypass", async () => {
+    await supervisors(h.tx);
+    expect(h.userFindMany.mock.calls[0][0].where).toEqual({
+      status: "ACTIVE",
+      role: { in: ["SUPERVISOR", "HEAD"] },
     });
   });
 });

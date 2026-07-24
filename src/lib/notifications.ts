@@ -111,6 +111,13 @@ export function qaLeads(tx: Prisma.TransactionClient): Promise<string[]> {
   });
 }
 
+/** Any SUPERVISOR or HEAD, department-agnostic — mirrors the `closeTicket` /
+ *  `rejectReview` authz gate exactly (which, unlike isMaintenanceHigher /
+ *  isQaHigher, has no ADMIN bypass and no department scoping). */
+export function supervisors(tx: Prisma.TransactionClient): Promise<string[]> {
+  return activeUserIds(tx, { role: { in: ["SUPERVISOR", "HEAD"] } });
+}
+
 /** The managed set of designated Production-Plan approvers (active only). */
 export async function planApprovers(tx: Prisma.TransactionClient): Promise<string[]> {
   const rows = await tx.productionPlanApprover.findMany({
@@ -145,6 +152,16 @@ const listSelect = {
 /** Unread count for the bell badge. */
 export function getUnreadCount(userId: string): Promise<number> {
   return prisma.notification.count({ where: { userId, readAt: null } });
+}
+
+/** Total count for the `/notifications` page's pagination (unread or all). */
+export function countNotifications(
+  userId: string,
+  { unreadOnly = false }: { unreadOnly?: boolean } = {}
+): Promise<number> {
+  return prisma.notification.count({
+    where: { userId, ...(unreadOnly ? { readAt: null } : {}) },
+  });
 }
 
 /** Recent notifications for the bell dropdown, newest first. */

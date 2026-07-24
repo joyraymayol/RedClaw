@@ -8,6 +8,14 @@ import { requireActiveUser } from "@/lib/auth";
 import { assertCan, canCreateTicketType } from "@/lib/authz";
 import { diffIds } from "@/lib/id-diff";
 import { ConflictError } from "@/lib/errors";
+import {
+  adminRecipients,
+  createNotification,
+  maintenanceLeads,
+  notifyUsers,
+  qaLeads,
+  supervisors,
+} from "@/lib/notifications";
 import { prisma } from "@/lib/prisma";
 import { applyCurrentProduct } from "@/lib/product-changeover";
 import { nextTicketNumber } from "@/lib/ticket-number";
@@ -33,6 +41,7 @@ import {
   ticketIdSchema,
 } from "@/lib/validations/ticket";
 import type { Prisma, Ticket } from "@/generated/prisma/client";
+import type { TicketStatus } from "@/generated/prisma/enums";
 
 export type TicketActionState = {
   error?: string;
@@ -117,6 +126,14 @@ export async function createTicket(
 
       await tx.ticketStatusHistory.create({
         data: { ticketId: ticket.id, fromStatus: null, toStatus: "OPEN", changedById: user.id },
+      });
+
+      await notifyUsers(tx, await adminRecipients(tx), {
+        type: "TICKET_NEEDS_ASSIGNMENT",
+        title: `${ticket.ticketNumber} needs assignment`,
+        body: ticket.title,
+        linkPath: `/tickets/${ticket.id}`,
+        actorId: user.id,
       });
 
       // PM tickets snapshot the machine's default checklist so later template
@@ -244,11 +261,22 @@ export async function createMachineSetupFromPlanRow(
 // status change guarded optimistically, plus the TicketStatusHistory row
 // that both audits it and feeds the "time spent" reports.
 
+type TicketWithAssignments = Ticket & { assignments: { technicianId: string }[] };
+
 type TransitionOptions = {
   data?: Prisma.TicketUpdateManyMutationInput;
   note?: string;
   /** Runs first inside the transaction — e.g. the technician busy-check. */
   guard?: (tx: Prisma.TransactionClient) => Promise<void>;
+  /** Runs last inside the transaction, right after the history row — the
+   *  notify hook for this transition. `ticket` is the pre-transition
+   *  snapshot (already loaded with assignments); `actorId` is whoever ran it. */
+  notify?: (
+    tx: Prisma.TransactionClient,
+    ticket: TicketWithAssignments,
+    toStatus: TicketStatus,
+    actorId: string
+  ) => Promise<void>;
 };
 
 async function runTransition(
@@ -285,6 +313,8 @@ async function runTransition(
         note: options.note,
       },
     });
+
+    if (options.notify) await options.notify(tx, ticket, toStatus, user.id);
   });
 
   revalidatePath("/tickets");
@@ -414,7 +444,38 @@ export async function resolveTicket(
     const ticketId = ticketIdFrom(formData);
     if (!ticketId) return { error: "Missing ticket." };
 
-    await runTransition(ticketId, "resolveTicket", { data: { resolvedAt: new Date() } });
+    await runTransition(ticketId, "resolveTicket", {
+      data: { resolvedAt: new Date() },
+      // Who needs to act next depends on the ticket type (plan §2 / RESOLVE_TARGET).
+      notify: async (tx, ticket, _toStatus, actorId) => {
+        const linkPath = `/tickets/${ticketId}`;
+        if (ticket.type === "MAINTENANCE") {
+          await createNotification(tx, ticket.requesterId, {
+            type: "TICKET_VERIFY_REQUESTED",
+            title: `${ticket.ticketNumber} needs your verification`,
+            body: ticket.title,
+            linkPath,
+            actorId,
+          });
+        } else if (ticket.type === "PREVENTIVE_MAINTENANCE") {
+          await notifyUsers(tx, await supervisors(tx), {
+            type: "TICKET_REVIEW_REQUESTED",
+            title: `${ticket.ticketNumber} ready for review`,
+            body: ticket.title,
+            linkPath,
+            actorId,
+          });
+        } else if (ticket.type === "MACHINE_SETUP") {
+          await notifyUsers(tx, await maintenanceLeads(tx), {
+            type: "SETUP_MAINTENANCE_APPROVAL",
+            title: `${ticket.ticketNumber} needs Maintenance approval`,
+            body: ticket.title,
+            linkPath,
+            actorId,
+          });
+        }
+      },
+    });
     return { success: true };
   });
 }
@@ -429,7 +490,18 @@ export async function verifyTicket(
     const ticketId = ticketIdFrom(formData);
     if (!ticketId) return { error: "Missing ticket." };
 
-    await runTransition(ticketId, "verifyTicket", { data: { verifiedAt: new Date() } });
+    await runTransition(ticketId, "verifyTicket", {
+      data: { verifiedAt: new Date() },
+      notify: async (tx, ticket, _toStatus, actorId) => {
+        await notifyUsers(tx, await supervisors(tx), {
+          type: "TICKET_REVIEW_REQUESTED",
+          title: `${ticket.ticketNumber} ready for review`,
+          body: ticket.title,
+          linkPath: `/tickets/${ticketId}`,
+          actorId,
+        });
+      },
+    });
     return { success: true };
   });
 }
@@ -448,6 +520,19 @@ export async function reopenTicket(
     await runTransition(parsed.data.ticketId, "reopenTicket", {
       data: { reopenCount: { increment: 1 } },
       note: parsed.data.note,
+      notify: async (tx, ticket, _toStatus, actorId) => {
+        await notifyUsers(
+          tx,
+          ticket.assignments.map((a) => a.technicianId),
+          {
+            type: "TICKET_REOPENED",
+            title: `${ticket.ticketNumber} reopened`,
+            body: ticket.title,
+            linkPath: `/tickets/${parsed.data.ticketId}`,
+            actorId,
+          }
+        );
+      },
     });
     return { success: true };
   });
@@ -478,7 +563,22 @@ export async function closeTicket(
     const ticketId = ticketIdFrom(formData);
     if (!ticketId) return { error: "Missing ticket." };
 
-    await runTransition(ticketId, "closeTicket", { data: { closedAt: new Date() } });
+    await runTransition(ticketId, "closeTicket", {
+      data: { closedAt: new Date() },
+      notify: async (tx, ticket, _toStatus, actorId) => {
+        await notifyUsers(
+          tx,
+          [ticket.requesterId, ...ticket.assignments.map((a) => a.technicianId)],
+          {
+            type: "TICKET_CLOSED",
+            title: `${ticket.ticketNumber} closed`,
+            body: ticket.title,
+            linkPath: `/tickets/${ticketId}`,
+            actorId,
+          }
+        );
+      },
+    });
     return { success: true };
   });
 }
@@ -497,6 +597,19 @@ export async function rejectReview(
     await runTransition(parsed.data.ticketId, "rejectReview", {
       data: { reopenCount: { increment: 1 } },
       note: parsed.data.note,
+      notify: async (tx, ticket, _toStatus, actorId) => {
+        await notifyUsers(
+          tx,
+          ticket.assignments.map((a) => a.technicianId),
+          {
+            type: "TICKET_REOPENED",
+            title: `${ticket.ticketNumber} reopened`,
+            body: ticket.title,
+            linkPath: `/tickets/${parsed.data.ticketId}`,
+            actorId,
+          }
+        );
+      },
     });
     return { success: true };
   });
@@ -516,6 +629,15 @@ export async function approveSetupMaintenance(
 
     await runTransition(ticketId, "approveSetupMaintenance", {
       note: "Machine setup approved by Maintenance — awaiting QA sign-off.",
+      notify: async (tx, ticket, _toStatus, actorId) => {
+        await notifyUsers(tx, await qaLeads(tx), {
+          type: "SETUP_QA_APPROVAL",
+          title: `${ticket.ticketNumber} needs QA approval`,
+          body: ticket.title,
+          linkPath: `/tickets/${ticketId}`,
+          actorId,
+        });
+      },
     });
     return { success: true };
   });
@@ -556,6 +678,19 @@ export async function approveSetupQa(
               });
             }
           : undefined,
+      notify: async (tx, ticket, _toStatus, actorId) => {
+        await notifyUsers(
+          tx,
+          [ticket.requesterId, ...ticket.assignments.map((a) => a.technicianId)],
+          {
+            type: "TICKET_CLOSED",
+            title: `${ticket.ticketNumber} closed`,
+            body: ticket.title,
+            linkPath: `/tickets/${ticketId}`,
+            actorId,
+          }
+        );
+      },
     });
     return { success: true };
   });
@@ -575,6 +710,19 @@ export async function rejectSetup(
     await runTransition(parsed.data.ticketId, "rejectSetup", {
       data: { reopenCount: { increment: 1 } },
       note: parsed.data.note,
+      notify: async (tx, ticket, _toStatus, actorId) => {
+        await notifyUsers(
+          tx,
+          ticket.assignments.map((a) => a.technicianId),
+          {
+            type: "SETUP_REJECTED",
+            title: `${ticket.ticketNumber} setup rejected`,
+            body: ticket.title,
+            linkPath: `/tickets/${parsed.data.ticketId}`,
+            actorId,
+          }
+        );
+      },
     });
     return { success: true };
   });
@@ -603,6 +751,19 @@ export async function cancelTicket(
     await runTransition(parsed.data.ticketId, "cancelTicket", {
       data: { cancelledAt: new Date() },
       note: parsed.data.note || undefined,
+      notify: async (tx, ticket, _toStatus, actorId) => {
+        await notifyUsers(
+          tx,
+          [ticket.requesterId, ...ticket.assignments.map((a) => a.technicianId)],
+          {
+            type: "TICKET_CANCELLED",
+            title: `${ticket.ticketNumber} cancelled`,
+            body: ticket.title,
+            linkPath: `/tickets/${parsed.data.ticketId}`,
+            actorId,
+          }
+        );
+      },
     });
     return { success: true };
   });
@@ -655,6 +816,7 @@ export async function assignTicket(
         status: "IN_PROGRESS",
         assignments: { some: { technicianId: { in: technicianIds }, unassignedAt: null } },
       },
+      include: openAssignmentsInclude,
     });
     const shouldPreempt =
       busyTickets.length > 0 && (ticket.priority === "HIGH" || ticket.priority === "CRITICAL");
@@ -686,6 +848,17 @@ export async function assignTicket(
               note: `Preempted by higher-priority ticket ${ticket.ticketNumber}`,
             },
           });
+          await notifyUsers(
+            tx,
+            busyTicket.assignments.map((a) => a.technicianId),
+            {
+              type: "TICKET_ON_HOLD",
+              title: `${busyTicket.ticketNumber} put on hold`,
+              body: `Preempted by higher-priority ticket ${ticket.ticketNumber}`,
+              linkPath: `/tickets/${busyTicket.id}`,
+              actorId: admin.id,
+            }
+          );
         }
 
         const { count } = await tx.ticket.updateMany({
@@ -734,6 +907,14 @@ export async function assignTicket(
           })),
         });
       }
+
+      await notifyUsers(tx, technicianIds, {
+        type: "TICKET_ASSIGNED",
+        title: `${ticket.ticketNumber} assigned to you`,
+        body: ticket.title,
+        linkPath: `/tickets/${ticketId}`,
+        actorId: admin.id,
+      });
     });
 
     revalidatePath("/tickets");
@@ -816,6 +997,21 @@ export async function updateAssignees(
           changedById: admin.id,
           note: `Team updated — ${parts.join("; ")}`,
         },
+      });
+
+      await notifyUsers(tx, toAdd, {
+        type: "TICKET_ASSIGNED",
+        title: `${ticket.ticketNumber} assigned to you`,
+        body: ticket.title,
+        linkPath: `/tickets/${ticketId}`,
+        actorId: admin.id,
+      });
+      await notifyUsers(tx, toRemove, {
+        type: "TICKET_UNASSIGNED",
+        title: `Removed from ${ticket.ticketNumber}`,
+        body: ticket.title,
+        linkPath: `/tickets/${ticketId}`,
+        actorId: admin.id,
       });
     });
 

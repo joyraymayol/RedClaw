@@ -115,6 +115,7 @@ enum NotificationType {
   TICKET_ASSIGNED
   TICKET_UNASSIGNED
   TICKET_NEEDS_ASSIGNMENT // a new ticket awaiting triage/assignment (→ admins)
+  TICKET_ON_HOLD // bumped to ON_HOLD by a higher-priority preempting assignment
   TICKET_RESOLVED
   TICKET_VERIFY_REQUESTED
   TICKET_REVIEW_REQUESTED

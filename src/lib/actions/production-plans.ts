@@ -6,7 +6,9 @@ import { redirect } from "next/navigation";
 import { runAction } from "@/lib/actions/action-helpers";
 import { requireActiveUser, requireRole } from "@/lib/auth";
 import { canPreparePlan, ForbiddenError } from "@/lib/authz";
+import { maintenanceLeads, notifyUsers, planApprovers } from "@/lib/notifications";
 import { prisma } from "@/lib/prisma";
+import { openAssignmentsInclude } from "@/lib/ticket-context";
 import {
   approverSchema,
   createProductionPlanSchema,
@@ -139,14 +141,32 @@ export async function submitPlan(planId: string): Promise<PlanActionState> {
     if (!canPreparePlan(user)) {
       throw new ForbiddenError("Only Production staff may submit a plan.");
     }
-    const { count } = await prisma.productionPlan.updateMany({
-      where: { id: planId, status: "DRAFT" },
-      data: { status: "PENDING_APPROVAL" },
+
+    const outcome = await prisma.$transaction(async (tx): Promise<PlanActionState> => {
+      const { count } = await tx.productionPlan.updateMany({
+        where: { id: planId, status: "DRAFT" },
+        data: { status: "PENDING_APPROVAL" },
+      });
+      if (count === 0) return { error: "Only a draft plan can be submitted." };
+
+      const plan = await tx.productionPlan.findUnique({
+        where: { id: planId },
+        select: { formNumber: true },
+      });
+      await notifyUsers(tx, await planApprovers(tx), {
+        type: "PLAN_APPROVAL_REQUESTED",
+        title: `Plan ${plan?.formNumber} needs approval`,
+        linkPath: `/production-plans/${planId}`,
+        actorId: user.id,
+      });
+      return { success: true };
     });
-    if (count === 0) return { error: "Only a draft plan can be submitted." };
-    revalidatePath(`/production-plans/${planId}`);
-    revalidatePath("/production-plans");
-    return { success: true };
+
+    if (outcome.success) {
+      revalidatePath(`/production-plans/${planId}`);
+      revalidatePath("/production-plans");
+    }
+    return outcome;
   });
 }
 
@@ -209,6 +229,14 @@ export async function approvePlan(planId: string): Promise<PlanActionState> {
           },
         });
       }
+
+      await notifyUsers(tx, [...(await maintenanceLeads(tx)), plan.preparedById], {
+        type: "PLAN_APPROVED",
+        title: `Plan ${plan.formNumber} approved`,
+        linkPath: `/production-plans/${planId}`,
+        actorId: user.id,
+      });
+
       return { success: true };
     });
 
@@ -246,8 +274,12 @@ export async function updatePlanRow(
     const row = await prisma.productionPlanRow.findUnique({
       where: { id: rowId },
       include: {
-        plan: { select: { id: true, status: true } },
+        plan: { select: { id: true, status: true, formNumber: true } },
         asset: { select: { productCapabilities: { select: { productId: true } } } },
+        tickets: {
+          where: { status: { notIn: ["CLOSED", "CANCELLED"] } },
+          include: openAssignmentsInclude,
+        },
       },
     });
     if (!row) return { error: "Row not found." };
@@ -305,6 +337,14 @@ export async function updatePlanRow(
       if (changes.length > 0) {
         await tx.productionPlanRowChange.createMany({
           data: changes.map((c) => ({ rowId, changedById: user.id, ...c })),
+        });
+
+        const assigneeIds = row.tickets.flatMap((t) => t.assignments.map((a) => a.technicianId));
+        await notifyUsers(tx, [...(await maintenanceLeads(tx)), ...assigneeIds], {
+          type: "PLAN_ROW_CHANGED",
+          title: `Plan ${row.plan.formNumber} row changed`,
+          linkPath: `/production-plans/${row.plan.id}`,
+          actorId: user.id,
         });
       }
     });
