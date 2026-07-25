@@ -22,3 +22,8 @@ export function TicketStatusBadge({ status }: { status: TicketStatus }) {
   const { label, variant } = STATUS_BADGE[status];
   return <Badge variant={variant}>{label}</Badge>;
 }
+
+/** Human labels for the TicketStatus enum, reused by filters/dropdowns. */
+export const TICKET_STATUS_LABELS: Record<TicketStatus, string> = Object.fromEntries(
+  Object.entries(STATUS_BADGE).map(([status, { label }]) => [status, label])
+) as Record<TicketStatus, string>;

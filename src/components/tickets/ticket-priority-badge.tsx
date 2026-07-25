@@ -25,3 +25,29 @@ export function TicketPriorityBadge({ priority }: { priority: TicketPriority }) 
     </Badge>
   );
 }
+
+/** Human labels for the TicketPriority enum, reused by filters/dropdowns. */
+export const TICKET_PRIORITY_LABELS: Record<TicketPriority, string> = Object.fromEntries(
+  Object.entries(PRIORITY_BADGE).map(([priority, { label }]) => [priority, label])
+) as Record<TicketPriority, string>;
+
+const PRIORITY_DOT_COLOR: Record<TicketPriority, string> = {
+  LOW: "bg-muted-foreground/50",
+  MEDIUM: "bg-foreground/60",
+  HIGH: "bg-amber-500",
+  CRITICAL: "bg-destructive",
+};
+
+/** Compact dot + label used in space-constrained layouts (mobile ticket cards). */
+export function TicketPriorityDot({ priority }: { priority: TicketPriority }) {
+  const { label } = PRIORITY_BADGE[priority];
+  return (
+    <span className="inline-flex items-center gap-1.5 text-sm text-foreground">
+      <span
+        aria-hidden
+        className={cn("size-2 shrink-0 rounded-full", PRIORITY_DOT_COLOR[priority])}
+      />
+      {label}
+    </span>
+  );
+}
