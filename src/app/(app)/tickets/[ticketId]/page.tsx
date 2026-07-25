@@ -10,12 +10,14 @@ import { TicketPriorityBadge } from "@/components/tickets/ticket-priority-badge"
 import { TicketStatusBadge } from "@/components/tickets/ticket-status-badge";
 import { TicketTimeline } from "@/components/tickets/ticket-timeline";
 import { TicketTypeBadge } from "@/components/tickets/ticket-type-badge";
+import { buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { can } from "@/lib/authz";
 import { requireActiveUser } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
 import { toTicketContext } from "@/lib/ticket-context";
+import { cn } from "@/lib/utils";
 
 export async function generateMetadata({
   params,
@@ -220,14 +222,17 @@ export default async function TicketDetailPage({
                   {flaggedAssets.length === 1 ? "Asset" : "Assets"}
                 </dt>
                 <dd className="text-right">
-                  {flaggedAssets.map((a, i) => (
-                    <span key={a.id}>
-                      {i > 0 && ", "}
-                      <Link href={`/assets/${a.id}`} className="hover:underline">
+                  <span className="inline-flex flex-wrap justify-end gap-1">
+                    {flaggedAssets.map((a) => (
+                      <Link
+                        key={a.id}
+                        href={`/assets/${a.id}`}
+                        className={cn(buttonVariants({ variant: "outline", size: "xs" }), "font-mono")}
+                      >
                         {a.assetCode}
                       </Link>
-                    </span>
-                  ))}
+                    ))}
+                  </span>
                 </dd>
               </div>
               <div className="flex justify-between gap-4">
@@ -264,7 +269,7 @@ export default async function TicketDetailPage({
                       <dd className="text-right">
                         <Link
                           href={`/production-plans/${ticket.productionPlanRow.plan.id}`}
-                          className="font-mono hover:underline"
+                          className={cn(buttonVariants({ variant: "outline", size: "xs" }), "font-mono")}
                         >
                           {ticket.productionPlanRow.plan.formNumber}
                         </Link>
