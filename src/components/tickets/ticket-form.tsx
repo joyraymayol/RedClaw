@@ -165,7 +165,7 @@ export function TicketForm({
           <input type="hidden" name="type" value={type} />
         )}
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="categoryId">Category</Label>
             <div className="relative">
@@ -346,7 +346,7 @@ export function TicketForm({
           </div>
         )}
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="priority">Priority</Label>
             <div className="relative">

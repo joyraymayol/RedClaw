@@ -127,6 +127,7 @@ export function PmChecklistTemplateDialog({ template }: { template?: Template })
                 <div className="space-y-2">
                   <Label htmlFor="name">Name</Label>
                   <Input
+                    key={template?.name ?? "new"}
                     id="name"
                     name="name"
                     defaultValue={template?.name}
@@ -137,6 +138,7 @@ export function PmChecklistTemplateDialog({ template }: { template?: Template })
                 <div className="space-y-2">
                   <Label htmlFor="description">Description</Label>
                   <Textarea
+                    key={template?.description ?? "new"}
                     id="description"
                     name="description"
                     defaultValue={template?.description ?? ""}

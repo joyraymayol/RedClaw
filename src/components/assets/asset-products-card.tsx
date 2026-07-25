@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
+import { SearchIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -13,6 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -50,11 +52,22 @@ function CapabilitiesDialog({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [selected, setSelected] = useState<Set<string>>(new Set(currentCapabilityIds));
+  const [query, setQuery] = useState("");
+
+  const filteredProducts = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return allProducts;
+    return allProducts.filter((p) => p.name.toLowerCase().includes(q));
+  }, [allProducts, query]);
 
   function handleOpenChange(next: boolean) {
     setOpen(next);
-    if (next) setSelected(new Set(currentCapabilityIds));
-    else setError(null);
+    if (next) {
+      setSelected(new Set(currentCapabilityIds));
+      setQuery("");
+    } else {
+      setError(null);
+    }
   }
 
   function toggle(id: string, checked: boolean) {
@@ -100,6 +113,19 @@ function CapabilitiesDialog({
             {[...selected].map((id) => (
               <input key={id} type="hidden" name="productIds" value={id} />
             ))}
+            {allProducts.length > 0 && (
+              <div className="relative">
+                <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search products…"
+                  aria-label="Search products"
+                  className="pl-8"
+                />
+              </div>
+            )}
             <ScrollArea className="max-h-64 rounded-md border">
               <div className="space-y-1 p-2 pr-3">
                 {allProducts.length === 0 && (
@@ -107,7 +133,12 @@ function CapabilitiesDialog({
                     No products yet — add some in Asset settings.
                   </p>
                 )}
-                {allProducts.map((p) => (
+                {allProducts.length > 0 && filteredProducts.length === 0 && (
+                  <p className="p-2 text-sm text-muted-foreground">
+                    No products match &ldquo;{query}&rdquo;.
+                  </p>
+                )}
+                {filteredProducts.map((p) => (
                   <label
                     key={p.id}
                     className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm hover:bg-muted"

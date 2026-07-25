@@ -139,7 +139,13 @@ export function AssetTypeFormDialog({
               </DialogHeader>
 
               {/* suppressHydrationWarning: Chrome iOS injects __gcruniqueid into forms */}
-              <form action={submit} className="space-y-4" suppressHydrationWarning>
+              {/* key: remount uncontrolled fields when the record's server data changes, instead of letting base-ui warn about defaultValue drifting on a mounted FieldControl/Select */}
+              <form
+                key={type ? `${type.id}:${type.name}:${type.categoryId}` : "new"}
+                action={submit}
+                className="space-y-4"
+                suppressHydrationWarning
+              >
                 {isEdit && <input type="hidden" name="typeId" value={type.id} />}
                 <div className="space-y-2">
                   <Label htmlFor="name">Name</Label>

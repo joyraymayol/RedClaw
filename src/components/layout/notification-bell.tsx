@@ -35,8 +35,15 @@ export function NotificationBell({ userId }: { userId: string }) {
   useEffect(() => {
     let cancelled = false;
     async function poll() {
-      const count = await fetchUnreadCount();
-      if (!cancelled) setUnreadCount(count);
+      // Next.js aborts an in-flight Server Action call (rejecting with a
+      // DOMException) when a route transition or Fast Refresh reload
+      // supersedes it — harmless since the next interval tick retries.
+      try {
+        const count = await fetchUnreadCount();
+        if (!cancelled) setUnreadCount(count);
+      } catch {
+        // ignore — transient, will retry on the next poll
+      }
     }
     poll();
     const id = setInterval(poll, POLL_INTERVAL_MS);
@@ -50,9 +57,13 @@ export function NotificationBell({ userId }: { userId: string }) {
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    fetchRecentNotifications().then((items) => {
-      if (!cancelled) setRecent(items);
-    });
+    fetchRecentNotifications()
+      .then((items) => {
+        if (!cancelled) setRecent(items);
+      })
+      .catch(() => {
+        // ignore — same transient-abort reasoning as the poll above
+      });
     return () => {
       cancelled = true;
     };

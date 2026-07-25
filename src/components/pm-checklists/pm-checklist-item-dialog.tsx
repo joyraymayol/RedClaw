@@ -131,6 +131,7 @@ export function PmChecklistItemDialog({
                 <div className="space-y-2">
                   <Label htmlFor="label">Task</Label>
                   <Input
+                    key={item?.label ?? "new"}
                     id="label"
                     name="label"
                     defaultValue={item?.label}
@@ -141,6 +142,7 @@ export function PmChecklistItemDialog({
                 <div className="space-y-2">
                   <Label htmlFor="sortOrder">Order</Label>
                   <Input
+                    key={item?.sortOrder ?? "new"}
                     id="sortOrder"
                     name="sortOrder"
                     type="number"

@@ -143,7 +143,13 @@ export function SolutionFormDialog({
               </DialogHeader>
 
               {/* suppressHydrationWarning: Chrome iOS injects __gcruniqueid into forms */}
-              <form action={submit} className="space-y-4" suppressHydrationWarning>
+              {/* key: remount uncontrolled fields when the record's server data changes, instead of letting base-ui warn about defaultValue drifting on a mounted FieldControl/Select */}
+              <form
+                key={solution?.updatedAt.toISOString() ?? "new"}
+                action={submit}
+                className="space-y-4"
+                suppressHydrationWarning
+              >
                 <input type="hidden" name="problemTypeId" value={problemTypeId} />
                 {isEdit && <input type="hidden" name="solutionId" value={solution.id} />}
                 <div className="space-y-2">

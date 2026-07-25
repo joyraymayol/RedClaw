@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
   // Next.js blocks cross-origin dev requests (JS chunks, HMR socket) from
   // any host other than localhost, so the page renders but never hydrates —
   // buttons look normal but don't respond to taps. Dev-only; unused in prod.
-  allowedDevOrigins: ["192.168.0.*", "10.10.50.197"],
+  allowedDevOrigins: ["192.168.0.*", "10.10.50.197", "Jojis-MacBook-Pro.local"],
 };
 
 export default nextConfig;

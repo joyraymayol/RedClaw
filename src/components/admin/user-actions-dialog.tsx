@@ -152,7 +152,13 @@ export function UserActionsDialog({
                 <input type="hidden" name="userId" value={user.id} />
                 <Label htmlFor={`role-${user.id}`}>Assign role</Label>
                 <div className="flex items-center gap-2">
-                  <Select name="role" defaultValue={user.role ?? undefined} required>
+                  {/* key: remount when the stored role changes, instead of letting base-ui warn about defaultValue drifting on a mounted Select */}
+                  <Select
+                    key={user.role ?? "none"}
+                    name="role"
+                    defaultValue={user.role ?? undefined}
+                    required
+                  >
                     <SelectTrigger id={`role-${user.id}`} className="flex-1">
                       <SelectValue placeholder="Select a role" />
                     </SelectTrigger>

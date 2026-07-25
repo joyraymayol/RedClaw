@@ -129,7 +129,13 @@ export function AssetCategoryFormDialog({ category }: { category?: AssetCategory
               </DialogHeader>
 
               {/* suppressHydrationWarning: Chrome iOS injects __gcruniqueid into forms */}
-              <form action={submit} className="space-y-4" suppressHydrationWarning>
+              {/* key: remount uncontrolled fields when the record's server data changes, instead of letting base-ui warn about defaultValue drifting on a mounted FieldControl */}
+              <form
+                key={category?.updatedAt.toISOString() ?? "new"}
+                action={submit}
+                className="space-y-4"
+                suppressHydrationWarning
+              >
                 {isEdit && (
                   <input type="hidden" name="categoryId" value={category.id} />
                 )}

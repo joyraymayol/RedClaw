@@ -161,7 +161,13 @@ export function AssetFormDialog({
           </DialogHeader>
 
           {/* suppressHydrationWarning: Chrome iOS injects __gcruniqueid into forms */}
-          <form action={submit} className="space-y-4" suppressHydrationWarning>
+          {/* key: remount uncontrolled fields (defaultValue) when the record's server data actually changes, instead of letting base-ui warn about defaultValue drifting on a mounted FieldControl */}
+          <form
+            key={asset?.updatedAt.toISOString() ?? "new"}
+            action={submit}
+            className="space-y-4"
+            suppressHydrationWarning
+          >
             {isEdit && (
               <input type="hidden" name="assetId" value={asset.id} />
             )}
