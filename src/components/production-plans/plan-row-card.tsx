@@ -56,8 +56,8 @@ export type PlanRowCardProps = {
   planApproved: boolean;
   snapshot: PlanRowSnapshot | null;
   changes: PlanRowChange[];
-  /** Optional action rendered in the card header (e.g. create-setup-ticket). */
-  headerAction?: ReactNode;
+  /** Optional row rendered under the title (e.g. the setup-tickets panel). */
+  ticketsPanel?: ReactNode;
 };
 
 function Field({ label, value }: { label: string; value: string }) {
@@ -84,7 +84,7 @@ export function PlanRowCard(props: PlanRowCardProps) {
     planApproved,
     snapshot,
     changes,
-    headerAction,
+    ticketsPanel,
   } = props;
 
   const router = useRouter();
@@ -118,9 +118,6 @@ export function PlanRowCard(props: PlanRowCardProps) {
         <h3 className="font-medium">{machineName}</h3>
         <div className="flex items-center gap-2">
           <span className="font-mono text-xs text-muted-foreground">{machineCode}</span>
-          {/* Wrap the passed-in action: as a foreign element among static
-              siblings it would otherwise trip React's array-key check. */}
-          {headerAction && <>{headerAction}</>}
           {canEdit && (
             <Button
               variant="ghost"
@@ -133,6 +130,10 @@ export function PlanRowCard(props: PlanRowCardProps) {
           )}
         </div>
       </div>
+
+      {/* Wrap the passed-in panel: as a foreign element among static
+          siblings it would otherwise trip React's array-key check. */}
+      {ticketsPanel && <>{ticketsPanel}</>}
 
       <dl className="grid gap-4 md:grid-cols-2">
         <Field label="Status" value={statusInstruction} />
@@ -189,7 +190,13 @@ export function PlanRowCard(props: PlanRowCardProps) {
               </DialogDescription>
             </DialogHeader>
 
-            <form action={submit} className="space-y-4" suppressHydrationWarning>
+            {/* key: remount uncontrolled fields when the row's server data changes, instead of letting base-ui warn about defaultValue drifting on a mounted FieldControl */}
+            <form
+              key={`${statusInstruction}:${referenceCycleTime}:${remarks}`}
+              action={submit}
+              className="space-y-4"
+              suppressHydrationWarning
+            >
               <input type="hidden" name="rowId" value={rowId} />
               <input type="hidden" name="productId" value={product === "__none__" ? "" : product} />
               <div className="space-y-2">

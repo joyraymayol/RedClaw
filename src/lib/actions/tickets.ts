@@ -18,6 +18,7 @@ import {
 } from "@/lib/notifications";
 import { prisma } from "@/lib/prisma";
 import { applyCurrentProduct } from "@/lib/product-changeover";
+import { canCreateNewSetupTicket } from "@/lib/production-plan-tickets";
 import { nextTicketNumber } from "@/lib/ticket-number";
 import {
   openAssetFlagsInclude,
@@ -170,8 +171,11 @@ export async function createTicket(
 
 /**
  * Spin a Machine-Setup ticket off an approved Production Plan row (plan §6),
- * pre-filled with the row's machine and target product. One open setup ticket
- * per row; Maintenance leads only.
+ * pre-filled with the row's machine and target product. Maintenance leads
+ * only. A row may only have one *current* setup ticket at a time — see
+ * canCreateNewSetupTicket — but a mid-week edit to the row (or the prior
+ * ticket being Cancelled outright) opens the door to a new one, so a plan
+ * can end up with several setup tickets against the same row over its life.
  */
 export async function createMachineSetupFromPlanRow(
   rowId: string
@@ -197,14 +201,22 @@ export async function createMachineSetupFromPlanRow(
       return { error: "That machine is retired." };
     }
 
-    // One open setup ticket per row — don't spawn duplicates.
-    const existing = await prisma.ticket.findFirst({
-      where: { productionPlanRowId: rowId, status: { notIn: ["CLOSED", "CANCELLED"] } },
-      select: { ticketNumber: true },
+    // Don't spawn a duplicate while the row's most recent setup ticket is
+    // still current for what the row asks for today (see
+    // canCreateNewSetupTicket for what makes a ticket "current").
+    const latestTicket = await prisma.ticket.findFirst({
+      where: { productionPlanRowId: rowId },
+      orderBy: { createdAt: "desc" },
+      select: { ticketNumber: true, status: true, createdAt: true },
     });
-    if (existing) {
+    const latestChange = await prisma.productionPlanRowChange.findFirst({
+      where: { rowId },
+      orderBy: { changedAt: "desc" },
+      select: { changedAt: true },
+    });
+    if (!canCreateNewSetupTicket(latestTicket, latestChange?.changedAt ?? null)) {
       return {
-        error: `A machine-setup ticket (${existing.ticketNumber}) already exists for this row.`,
+        error: `A machine-setup ticket (${latestTicket!.ticketNumber}) already exists for this row.`,
       };
     }
 

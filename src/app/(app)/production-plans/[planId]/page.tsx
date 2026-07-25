@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-import { CreateSetupTicketButton } from "@/components/production-plans/create-setup-ticket-button";
 import { PlanActionsBar } from "@/components/production-plans/plan-actions-bar";
 import { PlanHeaderDialog } from "@/components/production-plans/plan-header-dialog";
 import {
@@ -9,11 +8,13 @@ import {
   type PlanRowSnapshot,
 } from "@/components/production-plans/plan-row-card";
 import { ProductionPlanStatusBadge } from "@/components/production-plans/production-plan-status-badge";
+import { SetupTicketsPanel } from "@/components/production-plans/setup-tickets-panel";
 import type { Prisma } from "@/generated/prisma/client";
 import { requireActiveUser } from "@/lib/auth";
 import { canPreparePlan, isMaintenanceHigher } from "@/lib/authz";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
+import { canCreateNewSetupTicket } from "@/lib/production-plan-tickets";
 
 export async function generateMetadata({
   params,
@@ -76,11 +77,13 @@ export default async function ProductionPlanDetailPage({
             orderBy: { changedAt: "desc" },
             include: { changedBy: { select: { name: true } } },
           },
+          // All setup tickets ever raised off this row, newest first — closed
+          // ones stay visible so the row never looks ticket-less once one
+          // has been raised (see canCreateNewSetupTicket for why a new one
+          // may still be offered on top of an existing, non-stale ticket).
           tickets: {
-            where: { status: { notIn: ["CLOSED", "CANCELLED"] } },
             orderBy: { createdAt: "desc" },
-            select: { id: true, ticketNumber: true },
-            take: 1,
+            select: { id: true, ticketNumber: true, status: true, createdAt: true },
           },
         },
       },
@@ -179,11 +182,15 @@ export default async function ProductionPlanDetailPage({
               changedByName: c.changedBy.name,
               changedAt: formatDateTime(c.changedAt),
             }))}
-            headerAction={
+            ticketsPanel={
               canCreateSetup ? (
-                <CreateSetupTicketButton
+                <SetupTicketsPanel
                   rowId={row.id}
-                  existingTicket={row.tickets[0] ?? null}
+                  tickets={row.tickets}
+                  canCreateNew={canCreateNewSetupTicket(
+                    row.tickets[0] ?? null,
+                    row.changes[0]?.changedAt ?? null
+                  )}
                 />
               ) : undefined
             }
