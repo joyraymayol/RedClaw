@@ -81,7 +81,7 @@ export function TicketAssignDialog({
             <DialogTitle>{isManage ? "Update assigned technicians" : "Assign technicians"}</DialogTitle>
             <DialogDescription>
               {isManage
-                ? "Add or remove team members. This doesn't change the ticket's status."
+                ? "Add or remove team members. If every current technician is replaced while work is in progress, the ticket is automatically put on hold until the new team resumes it."
                 : "A HIGH or CRITICAL ticket assigned to a technician who's already mid-repair will bump their current ticket to hold and start this one right away."}
             </DialogDescription>
           </DialogHeader>

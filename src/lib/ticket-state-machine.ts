@@ -88,7 +88,7 @@ export const TERMINAL_STATUSES: readonly TicketStatus[] = [
   TicketStatus.CANCELLED,
 ];
 
-/** Hold reasons a technician may set themself; PREEMPTED_BY_HIGHER_PRIORITY is reserved for the admin preemption flow. */
+/** Hold reasons a technician may set themself; PREEMPTED_BY_HIGHER_PRIORITY and TEAM_REPLACED are system-set only (admin preemption and full-team-swap flows). */
 export const TECHNICIAN_HOLD_REASONS: readonly HoldReason[] = [
   HoldReason.WAITING_PARTS,
   HoldReason.WAITING_VENDOR,

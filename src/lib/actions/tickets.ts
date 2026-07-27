@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { runAction } from "@/lib/actions/action-helpers";
 import { requireActiveUser } from "@/lib/auth";
 import { assertCan, canCreateTicketType } from "@/lib/authz";
-import { diffIds } from "@/lib/id-diff";
+import { diffIds, isFullTeamSwap } from "@/lib/id-diff";
 import { ConflictError } from "@/lib/errors";
 import {
   adminRecipients,
@@ -960,6 +960,10 @@ export async function updateAssignees(
     if (toAdd.length === 0 && toRemove.length === 0) {
       return { error: "No membership changes." };
     }
+    // Every currently-active tech is being swapped out for a new set while
+    // the ticket is mid-work — no one is left who was actually doing the
+    // work, so force it to ON_HOLD until the new team clicks Resume.
+    const fullSwap = ticket.status === "IN_PROGRESS" && isFullTeamSwap(ctx.assigneeIds, { toAdd, toRemove });
 
     const addedTechnicians = toAdd.length ? await loadActiveTechnicians(toAdd) : [];
     if (!addedTechnicians) return { error: "Pick active technicians only." };
@@ -971,11 +975,14 @@ export async function updateAssignees(
       : [];
 
     await prisma.$transaction(async (tx) => {
-      // Membership edit, not a status transition — the status itself is
+      // Usually a membership edit, not a status transition — the status is
       // rewritten unchanged just to drive the optimistic concurrency guard.
+      // Exception: a full team swap on an IN_PROGRESS ticket (fullSwap)
+      // forces it to ON_HOLD, since no one from the original team is left
+      // to actually be doing the work.
       const { count } = await tx.ticket.updateMany({
         where: { id: ticketId, status: ticket.status },
-        data: { status: ticket.status },
+        data: fullSwap ? { status: "ON_HOLD", holdReason: "TEAM_REPLACED" } : { status: ticket.status },
       });
       if (count === 0) throw new ConflictError("Ticket changed state — refresh and retry.");
 
@@ -1005,9 +1012,11 @@ export async function updateAssignees(
         data: {
           ticketId,
           fromStatus: ticket.status,
-          toStatus: ticket.status,
+          toStatus: fullSwap ? "ON_HOLD" : ticket.status,
           changedById: admin.id,
-          note: `Team updated — ${parts.join("; ")}`,
+          note: fullSwap
+            ? `Team fully replaced — ${parts.join("; ")} — automatically placed on hold until the new team resumes it`
+            : `Team updated — ${parts.join("; ")}`,
         },
       });
 
@@ -1025,6 +1034,15 @@ export async function updateAssignees(
         linkPath: `/tickets/${ticketId}`,
         actorId: admin.id,
       });
+      if (fullSwap) {
+        await notifyUsers(tx, toAdd, {
+          type: "TICKET_ON_HOLD",
+          title: `${ticket.ticketNumber} is on hold`,
+          body: "You're the new team — resume it when you're ready to start work.",
+          linkPath: `/tickets/${ticketId}`,
+          actorId: admin.id,
+        });
+      }
     });
 
     revalidatePath("/tickets");

@@ -10,3 +10,11 @@ export function diffIds(
     toRemove: [...current].filter((id) => !desired.has(id)),
   };
 }
+
+/** True when every currently-active member is removed while at least one new member is added — a full team replacement, not a partial reshuffle. */
+export function isFullTeamSwap(
+  currentIds: readonly string[],
+  diff: { toAdd: readonly string[]; toRemove: readonly string[] }
+): boolean {
+  return currentIds.length > 0 && diff.toRemove.length === currentIds.length && diff.toAdd.length > 0;
+}

@@ -72,6 +72,7 @@ enum HoldReason {
   WAITING_PARTS
   WAITING_VENDOR
   OTHER
+  TEAM_REPLACED // system-set: updateAssignees fully swapped an IN_PROGRESS ticket's team
 }
 
 enum AssetStatus {
