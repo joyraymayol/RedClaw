@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 
 import { RemarkThread } from "@/components/tickets/remark-thread";
 import { TicketActions } from "@/components/tickets/ticket-actions";
+import { TicketBackButton } from "@/components/tickets/ticket-back-button";
 import { TicketChecklistCard } from "@/components/tickets/ticket-checklist-card";
 import { TicketMaterialsCard } from "@/components/tickets/ticket-materials-card";
 import { TicketPriorityBadge } from "@/components/tickets/ticket-priority-badge";
@@ -141,9 +142,7 @@ export default async function TicketDetailPage({
   return (
     <div className="space-y-6">
       <div className="space-y-1">
-        <Link href="/tickets" className="text-sm text-muted-foreground hover:underline">
-          ← Tickets
-        </Link>
+        <TicketBackButton />
       </div>
 
       <div className="flex flex-wrap items-start justify-between gap-4">
