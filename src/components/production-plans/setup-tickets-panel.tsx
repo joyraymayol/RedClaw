@@ -31,6 +31,8 @@ export function SetupTicketsPanel({
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
+  if (tickets.length === 0 && !canCreateNew) return null;
+
   return (
     <div className="flex flex-wrap items-center gap-2">
       {tickets.map((t) => (

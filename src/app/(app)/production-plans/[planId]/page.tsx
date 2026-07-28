@@ -183,16 +183,17 @@ export default async function ProductionPlanDetailPage({
               changedAt: formatDateTime(c.changedAt),
             }))}
             ticketsPanel={
-              canCreateSetup ? (
-                <SetupTicketsPanel
-                  rowId={row.id}
-                  tickets={row.tickets}
-                  canCreateNew={canCreateNewSetupTicket(
+              <SetupTicketsPanel
+                rowId={row.id}
+                tickets={row.tickets}
+                canCreateNew={
+                  canCreateSetup &&
+                  canCreateNewSetupTicket(
                     row.tickets[0] ?? null,
                     row.changes[0]?.changedAt ?? null
-                  )}
-                />
-              ) : undefined
+                  )
+                }
+              />
             }
           />
         ))}
