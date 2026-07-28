@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { TableSkeleton } from "@/components/skeletons/table-skeleton";
+import { TicketFilterBar } from "@/components/tickets/ticket-filter-bar";
 import { TicketFilterSheet } from "@/components/tickets/ticket-filter-sheet";
 import { TicketListCard } from "@/components/tickets/ticket-list-card";
 import { TICKET_PRIORITY_LABELS, TicketPriorityBadge } from "@/components/tickets/ticket-priority-badge";
@@ -114,9 +115,11 @@ const TICKET_TYPES = Object.keys(TICKET_TYPE_LABELS) as TicketType[];
 type TableState = {
   filter: string;
   category: string;
+  asset: string;
   type: string;
   priority: string;
   status: string;
+  technician: string;
   q: string;
   from: string;
   to: string;
@@ -129,9 +132,11 @@ function tableHref(state: TableState, page?: number) {
   const params = new URLSearchParams();
   if (state.filter !== "all") params.set("filter", state.filter);
   if (state.category) params.set("category", state.category);
+  if (state.asset) params.set("asset", state.asset);
   if (state.type) params.set("type", state.type);
   if (state.priority) params.set("priority", state.priority);
   if (state.status) params.set("status", state.status);
+  if (state.technician) params.set("technician", state.technician);
   if (state.q) params.set("q", state.q);
   if (state.from) params.set("from", state.from);
   if (state.to) params.set("to", state.to);
@@ -198,9 +203,11 @@ export default async function TicketsPage({
   searchParams: Promise<{
     filter?: string;
     category?: string;
+    asset?: string;
     type?: string;
     priority?: string;
     status?: string;
+    technician?: string;
     q?: string;
     from?: string;
     to?: string;
@@ -215,6 +222,7 @@ export default async function TicketsPage({
 
   const filter = FILTERS.find((f) => f.key === params.filter) ?? FILTERS[0];
   const category = params.category?.trim() ?? "";
+  const asset = params.asset?.trim() ?? "";
   const type =
     params.type && (TICKET_TYPES as string[]).includes(params.type) ? params.type : "";
   const priority =
@@ -224,6 +232,7 @@ export default async function TicketsPage({
   const statuses = (params.status?.split(",") ?? [])
     .map((s) => s.trim())
     .filter((s): s is TicketStatus => (TICKET_STATUSES as string[]).includes(s));
+  const technician = params.technician?.trim() ?? "";
   const q = params.q?.trim() ?? "";
   const fromDate = parseDayParam(params.from);
   const toDate = parseDayParam(params.to);
@@ -239,9 +248,11 @@ export default async function TicketsPage({
   const state: TableState = {
     filter: filter.key,
     category,
+    asset,
     type,
     priority,
     status: statuses.join(","),
+    technician,
     q,
     from,
     to,
@@ -250,11 +261,21 @@ export default async function TicketsPage({
     dir,
   };
 
-  const categories = await prisma.assetCategory.findMany({
-    orderBy: { name: "asc" },
-    select: { id: true, name: true },
-  });
-
+  const [categories, assets, technicians] = await Promise.all([
+    prisma.assetCategory.findMany({
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+    prisma.asset.findMany({
+      orderBy: { assetCode: "asc" },
+      select: { id: true, assetCode: true, name: true },
+    }),
+    prisma.user.findMany({
+      where: { role: "TECHNICIAN", status: "ACTIVE" },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+  ]);
   // Requesters see their own tickets; technicians see what's assigned to
   // them; admins/supervisors/head see everything (plan §1 — the page just
   // narrows what's visible, `can()` is still the real gate on every action).
@@ -273,7 +294,20 @@ export default async function TicketsPage({
     ...(type && { type: type as TicketType }),
     ...(priority && { priority: priority as TicketPriority }),
     ...(statuses.length > 0 && { status: { in: statuses } }),
-    ...(category && { assets: { some: { unflaggedAt: null, asset: { categoryId: category } } } }),
+    ...((category || asset) && {
+      assets: {
+        some: {
+          unflaggedAt: null,
+          asset: {
+            ...(category && { categoryId: category }),
+            ...(asset && { id: asset }),
+          },
+        },
+      },
+    }),
+    ...(technician && {
+      assignments: { some: { technicianId: technician, unassignedAt: null } },
+    }),
     ...(q && {
       OR: [
         { ticketNumber: { contains: q, mode: "insensitive" } },
@@ -447,9 +481,9 @@ export default async function TicketsPage({
           </div>
         </div>
 
-        {/* Desktop: unchanged — status tabs, raised-date + search, category
-            and type chip rows above the table. */}
-        <div className="hidden space-y-6 md:block">
+        {/* Desktop: status tabs + raised-date above a bordered filter panel
+            (Category/Asset/Type/Priority/Status/Technician + search). */}
+        <div className="hidden space-y-4 md:block">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-1">
               {FILTERS.map((f) => {
@@ -481,71 +515,15 @@ export default async function TicketsPage({
                 );
               })}
             </div>
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <DateRangeFilter label="Raised date" resetParams={["page"]} />
-              <DebouncedSearchInput
-                placeholder="Search ticket #, title, asset…"
-                ariaLabel="Search tickets"
-                resetParams={["page"]}
-              />
-            </div>
+            <DateRangeFilter label="Raised date" resetParams={["page"]} />
           </div>
 
-          <div className="flex flex-wrap items-center gap-1">
-            <Link
-              href={tableHref({ ...state, category: "" })}
-              className={cn(
-                "rounded-md px-2.5 py-1.5 text-sm transition-colors",
-                !category
-                  ? "bg-muted font-medium text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              All categories
-            </Link>
-            {categories.map((c) => (
-              <Link
-                key={c.id}
-                href={tableHref({ ...state, category: c.id })}
-                className={cn(
-                  "rounded-md px-2.5 py-1.5 text-sm transition-colors",
-                  category === c.id
-                    ? "bg-muted font-medium text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {c.name}
-              </Link>
-            ))}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-1">
-            <Link
-              href={tableHref({ ...state, type: "" })}
-              className={cn(
-                "rounded-md px-2.5 py-1.5 text-sm transition-colors",
-                !type
-                  ? "bg-muted font-medium text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              All types
-            </Link>
-            {TICKET_TYPES.map((t) => (
-              <Link
-                key={t}
-                href={tableHref({ ...state, type: t })}
-                className={cn(
-                  "rounded-md px-2.5 py-1.5 text-sm transition-colors",
-                  type === t
-                    ? "bg-muted font-medium text-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {TICKET_TYPE_LABELS[t]}
-              </Link>
-            ))}
-          </div>
+          <TicketFilterBar
+            categories={categories}
+            assets={assets}
+            technicians={technicians}
+            current={{ category, asset, type, priority, status: state.status, technician }}
+          />
         </div>
 
         <ListNavPending
