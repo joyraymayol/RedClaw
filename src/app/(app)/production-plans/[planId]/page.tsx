@@ -64,6 +64,7 @@ export default async function ProductionPlanDetailPage({
         include: {
           asset: {
             select: {
+              id: true,
               assetCode: true,
               name: true,
               productCapabilities: {
@@ -163,6 +164,7 @@ export default async function ProductionPlanDetailPage({
           <PlanRowCard
             key={row.id}
             rowId={row.id}
+            machineId={row.asset.id}
             machineCode={row.asset.assetCode}
             machineName={row.asset.name}
             statusInstruction={row.statusInstruction}

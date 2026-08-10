@@ -2,9 +2,10 @@
 
 import { useState, useTransition, type ReactNode } from "react";
 import { PencilIcon } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
   DialogClose,
@@ -24,6 +25,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { updatePlanRow, type PlanActionState } from "@/lib/actions/production-plans";
+import { cn } from "@/lib/utils";
 
 export type PlanRowChange = {
   id: string;
@@ -44,6 +46,7 @@ export type PlanRowSnapshot = {
 
 export type PlanRowCardProps = {
   rowId: string;
+  machineId: string;
   machineCode: string;
   machineName: string;
   statusInstruction: string;
@@ -72,6 +75,7 @@ function Field({ label, value }: { label: string; value: string }) {
 export function PlanRowCard(props: PlanRowCardProps) {
   const {
     rowId,
+    machineId,
     machineCode,
     machineName,
     statusInstruction,
@@ -117,7 +121,12 @@ export function PlanRowCard(props: PlanRowCardProps) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-medium">{machineName}</h3>
         <div className="flex items-center gap-2">
-          <span className="font-mono text-xs text-muted-foreground">{machineCode}</span>
+          <Link
+            href={`/assets/${machineId}`}
+            className={cn(buttonVariants({ variant: "outline", size: "xs" }), "font-mono")}
+          >
+            {machineCode}
+          </Link>
           {canEdit && (
             <Button
               variant="ghost"
