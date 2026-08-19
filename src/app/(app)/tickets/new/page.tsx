@@ -44,6 +44,10 @@ export default async function NewTicketPage() {
           orderBy: { addedAt: "asc" },
           select: { product: { select: { id: true, name: true } } },
         },
+        checklistAssignments: {
+          orderBy: { addedAt: "asc" },
+          select: { template: { select: { id: true, name: true } } },
+        },
       },
     }),
     prisma.problemType.findMany({
@@ -70,6 +74,9 @@ export default async function NewTicketPage() {
   const productsByAsset: Record<string, { id: string; name: string }[]> = Object.fromEntries(
     assets.map((a) => [a.id, a.productCapabilities.map((c) => c.product)])
   );
+  const checklistsByAsset: Record<string, { id: string; name: string }[]> = Object.fromEntries(
+    assets.map((a) => [a.id, a.checklistAssignments.map((c) => c.template)])
+  );
 
   return (
     <div className="mx-auto max-w-xl">
@@ -88,6 +95,7 @@ export default async function NewTicketPage() {
             solutions={solutions}
             allowedTypes={allowedTypes}
             productsByAsset={productsByAsset}
+            checklistsByAsset={checklistsByAsset}
           />
         </CardContent>
       </Card>

@@ -44,20 +44,17 @@ const STATUS_LABEL: Record<AssetStatus, string> = {
 type CategoryOption = { id: string; name: string; supportsParentAsset: boolean };
 type TypeOption = { id: string; name: string; categoryId: string };
 type AssetOption = { id: string; assetCode: string; name: string; categoryId: string; status: AssetStatus };
-type TemplateOption = { id: string; name: string };
 
 export function AssetFormDialog({
   asset,
   categories,
   types,
   assets,
-  checklistTemplates,
 }: {
   asset?: Asset;
   categories: CategoryOption[];
   types: TypeOption[];
   assets: AssetOption[];
-  checklistTemplates: TemplateOption[];
 }) {
   const isEdit = !!asset;
   const [open, setOpen] = useState(false);
@@ -68,7 +65,6 @@ export function AssetFormDialog({
   const [categoryId, setCategoryId] = useState(asset?.categoryId ?? "");
   const [typeId, setTypeId] = useState(asset?.typeId ?? "__none__");
   const [parentAssetId, setParentAssetId] = useState(asset?.parentAssetId ?? "__none__");
-  const [pmTemplateId, setPmTemplateId] = useState(asset?.pmChecklistTemplateId ?? "__none__");
 
   const selectedCategory = categories.find((c) => c.id === categoryId);
   const typesInCategory = useMemo(
@@ -98,19 +94,11 @@ export function AssetFormDialog({
     }),
     [parentCandidates]
   );
-  const templateItems = useMemo(
-    () => ({
-      __none__: "None",
-      ...Object.fromEntries(checklistTemplates.map((t) => [t.id, t.name])),
-    }),
-    [checklistTemplates]
-  );
 
   function resetFromAsset() {
     setCategoryId(asset?.categoryId ?? "");
     setTypeId(asset?.typeId ?? "__none__");
     setParentAssetId(asset?.parentAssetId ?? "__none__");
-    setPmTemplateId(asset?.pmChecklistTemplateId ?? "__none__");
   }
 
   function submit(formData: FormData) {
@@ -293,37 +281,14 @@ export function AssetFormDialog({
                   </div>
                 )}
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="location">Location</Label>
-                    <Input
-                      id="location"
-                      name="location"
-                      defaultValue={asset?.location ?? ""}
-                      placeholder="Bay 3"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="pmChecklistTemplateId">PM checklist</Label>
-                    <Select
-                      name="pmChecklistTemplateId"
-                      items={templateItems}
-                      value={pmTemplateId}
-                      onValueChange={(v) => setPmTemplateId(v ?? "__none__")}
-                    >
-                      <SelectTrigger id="pmChecklistTemplateId" className="w-full">
-                        <SelectValue placeholder="None" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">None</SelectItem>
-                        {checklistTemplates.map((t) => (
-                          <SelectItem key={t.id} value={t.id}>
-                            {t.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                <div className="space-y-2">
+                  <Label htmlFor="location">Location</Label>
+                  <Input
+                    id="location"
+                    name="location"
+                    defaultValue={asset?.location ?? ""}
+                    placeholder="Bay 3"
+                  />
                 </div>
 
                 <div className="grid grid-cols-3 gap-4">

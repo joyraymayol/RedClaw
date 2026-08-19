@@ -66,12 +66,15 @@ export async function createTicket(
       assetId: formData.get("assetId"),
       problemTypeId: formData.get("problemTypeId"),
       suggestedSolutionId: formData.get("suggestedSolutionId"),
+      targetProductId: formData.get("targetProductId"),
+      pmChecklistTemplateId: formData.get("pmChecklistTemplateId"),
       priority: formData.get("priority"),
       title: formData.get("title"),
       description: formData.get("description"),
     });
     if (!parsed.success) return { error: parsed.error.issues[0].message };
-    const { priority, assetId, type, targetProductId, ...rest } = parsed.data;
+    const { priority, assetId, type, targetProductId, pmChecklistTemplateId, ...rest } =
+      parsed.data;
 
     // Type-specific creation gate (department + role). MAINTENANCE is open to
     // any active employee; PM/Machine-Setup are Maintenance-lead only.
@@ -82,7 +85,7 @@ export async function createTicket(
       where: { id: assetId },
       select: {
         status: true,
-        pmChecklistTemplateId: true,
+        checklistAssignments: { select: { templateId: true } },
         productCapabilities: { select: { productId: true } },
       },
     });
@@ -100,6 +103,16 @@ export async function createTicket(
       setupTargetProductId = targetProductId;
     }
 
+    // A PM ticket may name which of the asset's linked checklists to use —
+    // it must be one actually attached to this asset.
+    let chosenChecklistTemplateId: string | null = null;
+    if (type === "PREVENTIVE_MAINTENANCE" && pmChecklistTemplateId) {
+      if (!asset.checklistAssignments.some((a) => a.templateId === pmChecklistTemplateId)) {
+        return { error: "Choose a checklist attached to this asset." };
+      }
+      chosenChecklistTemplateId = pmChecklistTemplateId;
+    }
+
     const ticketId = await prisma.$transaction(async (tx) => {
       const slaPolicy = await tx.slaPolicy.findUnique({ where: { priority } });
       const now = Date.now();
@@ -114,6 +127,7 @@ export async function createTicket(
           type,
           priority,
           targetProductId: setupTargetProductId,
+          pmChecklistTemplateId: chosenChecklistTemplateId,
           ticketNumber: await nextTicketNumber(tx),
           requesterId: user.id,
           ackDueAt,
@@ -137,11 +151,11 @@ export async function createTicket(
         actorId: user.id,
       });
 
-      // PM tickets snapshot the machine's default checklist so later template
+      // PM tickets snapshot the chosen checklist's items so later template
       // edits never rewrite this ticket's checklist.
-      if (type === "PREVENTIVE_MAINTENANCE" && asset.pmChecklistTemplateId) {
+      if (chosenChecklistTemplateId) {
         const items = await tx.pmChecklistTemplateItem.findMany({
-          where: { templateId: asset.pmChecklistTemplateId },
+          where: { templateId: chosenChecklistTemplateId },
           orderBy: { sortOrder: "asc" },
           select: { label: true, sortOrder: true },
         });

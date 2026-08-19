@@ -280,10 +280,17 @@ async function seedPmChecklistTemplates() {
         data: tpl.items.map((label, i) => ({ templateId: template.id, label, sortOrder: i })),
       });
     }
-    await prisma.asset.updateMany({
+    const assets = await prisma.asset.findMany({
       where: { assetCode: { in: [...tpl.assetCodes] } },
-      data: { pmChecklistTemplateId: template.id },
+      select: { id: true },
     });
+    for (const a of assets) {
+      await prisma.assetPmChecklistTemplate.upsert({
+        where: { assetId_templateId: { assetId: a.id, templateId: template.id } },
+        update: {},
+        create: { assetId: a.id, templateId: template.id },
+      });
+    }
   }
   console.log(`✓ ${PM_TEMPLATES.length} PM checklist templates ensured`);
 }

@@ -135,7 +135,7 @@ export default async function AssetsPage({
   const dir: SortDir = params.dir === "desc" ? "desc" : "asc";
   const state: TableState = { q, category, perPage, sort, dir };
 
-  const [categories, types, allAssets, checklistTemplates] = await Promise.all([
+  const [categories, types, allAssets] = await Promise.all([
     prisma.assetCategory.findMany({
       orderBy: { name: "asc" },
       select: { id: true, name: true, supportsParentAsset: true },
@@ -147,10 +147,6 @@ export default async function AssetsPage({
     prisma.asset.findMany({
       orderBy: { assetCode: "asc" },
       select: { id: true, assetCode: true, name: true, categoryId: true, status: true },
-    }),
-    prisma.pmChecklistTemplate.findMany({
-      orderBy: { name: "asc" },
-      select: { id: true, name: true },
     }),
   ]);
 
@@ -210,7 +206,6 @@ export default async function AssetsPage({
               categories={categories}
               types={types}
               assets={allAssets}
-              checklistTemplates={checklistTemplates}
             />
           )}
         </div>
@@ -314,7 +309,6 @@ export default async function AssetsPage({
                       categories={categories}
                       types={types}
                       assets={allAssets}
-                      checklistTemplates={checklistTemplates}
                     />
                   </TableCell>
                 )}

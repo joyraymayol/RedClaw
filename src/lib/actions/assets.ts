@@ -9,6 +9,7 @@ import { prisma } from "@/lib/prisma";
 import { isUniqueConstraintError } from "@/lib/prisma-errors";
 import { applyCurrentProduct } from "@/lib/product-changeover";
 import { assetSchema } from "@/lib/validations/asset";
+import { assetChecklistsSchema } from "@/lib/validations/pm-checklist";
 import { productCapabilitiesSchema, setCurrentProductSchema } from "@/lib/validations/product";
 
 export type AssetActionState = {
@@ -19,15 +20,12 @@ export type AssetActionState = {
 function parseAssetForm(formData: FormData) {
   const typeId = formData.get("typeId");
   const parentAssetId = formData.get("parentAssetId");
-  const pmChecklistTemplateId = formData.get("pmChecklistTemplateId");
   return assetSchema.safeParse({
     assetCode: formData.get("assetCode"),
     name: formData.get("name"),
     categoryId: formData.get("categoryId"),
     typeId: typeId === "__none__" ? "" : typeId,
     parentAssetId: parentAssetId === "__none__" ? "" : parentAssetId,
-    pmChecklistTemplateId:
-      pmChecklistTemplateId === "__none__" ? "" : pmChecklistTemplateId,
     location: formData.get("location"),
     status: formData.get("status"),
     serialNumber: formData.get("serialNumber"),
@@ -176,6 +174,51 @@ export async function updateProductCapabilities(
   });
 
   revalidatePath(`/assets/${assetId}`);
+  return { success: true };
+}
+
+export async function updateAssetChecklists(
+  _prevState: AssetActionState,
+  formData: FormData
+): Promise<AssetActionState> {
+  await requireRole("ADMIN", "HEAD");
+
+  const parsed = assetChecklistsSchema.safeParse({
+    assetId: formData.get("assetId"),
+    templateIds: formData.getAll("templateIds"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  const { assetId, templateIds } = parsed.data;
+
+  const asset = await prisma.asset.findUnique({
+    where: { id: assetId },
+    include: { checklistAssignments: true },
+  });
+  if (!asset) return { error: "Asset not found." };
+
+  const { toAdd, toRemove } = diffIds(
+    asset.checklistAssignments.map((a) => a.templateId),
+    templateIds
+  );
+  if (toAdd.length === 0 && toRemove.length === 0) {
+    return { error: "No checklist changes." };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    if (toRemove.length > 0) {
+      await tx.assetPmChecklistTemplate.deleteMany({
+        where: { assetId, templateId: { in: toRemove } },
+      });
+    }
+    if (toAdd.length > 0) {
+      await tx.assetPmChecklistTemplate.createMany({
+        data: toAdd.map((templateId) => ({ assetId, templateId })),
+      });
+    }
+  });
+
+  revalidatePath(`/assets/${assetId}`);
+  revalidatePath("/pm-checklists");
   return { success: true };
 }
 

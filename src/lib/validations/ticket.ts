@@ -15,6 +15,8 @@ export const newTicketSchema = z.object({
   suggestedSolutionId: optionalId(),
   // MACHINE_SETUP only: the mold/product to switch the machine to on QA close.
   targetProductId: optionalId(),
+  // PREVENTIVE_MAINTENANCE only: which of the asset's linked checklists to snapshot.
+  pmChecklistTemplateId: optionalId(),
   priority: z.enum(["LOW", "MEDIUM", "HIGH", "CRITICAL"]),
   title: z.string().trim().min(5, "Give a short summary").max(120),
   description: z.string().trim().min(10, "Add a bit more detail").max(4000),

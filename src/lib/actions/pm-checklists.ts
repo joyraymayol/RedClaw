@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache";
 import { runAction } from "@/lib/actions/action-helpers";
 import { requireActiveUser, requireRole } from "@/lib/auth";
 import { assertCan } from "@/lib/authz";
+import { diffIds } from "@/lib/id-diff";
 import { prisma } from "@/lib/prisma";
 import { isForeignKeyConstraintError, isUniqueConstraintError } from "@/lib/prisma-errors";
 import { openAssignmentsInclude, toTicketContext } from "@/lib/ticket-context";
@@ -12,6 +13,7 @@ import {
   checklistResultSchema,
   pmChecklistItemSchema,
   pmChecklistTemplateSchema,
+  templateAssetsSchema,
 } from "@/lib/validations/pm-checklist";
 
 export type PmChecklistActionState = {
@@ -88,8 +90,8 @@ export async function deletePmChecklistTemplate(
   if (!templateId) return { error: "Missing checklist." };
 
   try {
-    // Items cascade; the FK from Asset.pmChecklistTemplateId is ON DELETE SET
-    // NULL, so a template in use by machines can still be deleted.
+    // Items and asset assignments cascade, so a template in use by machines
+    // can still be deleted.
     await prisma.pmChecklistTemplate.delete({ where: { id: templateId } });
   } catch (e) {
     if (isForeignKeyConstraintError(e)) {
@@ -97,6 +99,53 @@ export async function deletePmChecklistTemplate(
     }
     throw e;
   }
+
+  revalidatePath("/pm-checklists");
+  revalidatePath("/assets");
+  return { success: true };
+}
+
+// ── Asset assignments (template-side edit of the many-to-many) ─────────────
+
+export async function updateTemplateAssets(
+  _prevState: PmChecklistActionState,
+  formData: FormData
+): Promise<PmChecklistActionState> {
+  await requireRole(...MANAGER_ROLES);
+
+  const parsed = templateAssetsSchema.safeParse({
+    templateId: formData.get("templateId"),
+    assetIds: formData.getAll("assetIds"),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  const { templateId, assetIds } = parsed.data;
+
+  const template = await prisma.pmChecklistTemplate.findUnique({
+    where: { id: templateId },
+    include: { assetAssignments: true },
+  });
+  if (!template) return { error: "Checklist not found." };
+
+  const { toAdd, toRemove } = diffIds(
+    template.assetAssignments.map((a) => a.assetId),
+    assetIds
+  );
+  if (toAdd.length === 0 && toRemove.length === 0) {
+    return { error: "No asset changes." };
+  }
+
+  await prisma.$transaction(async (tx) => {
+    if (toRemove.length > 0) {
+      await tx.assetPmChecklistTemplate.deleteMany({
+        where: { templateId, assetId: { in: toRemove } },
+      });
+    }
+    if (toAdd.length > 0) {
+      await tx.assetPmChecklistTemplate.createMany({
+        data: toAdd.map((assetId) => ({ templateId, assetId })),
+      });
+    }
+  });
 
   revalidatePath("/pm-checklists");
   revalidatePath("/assets");

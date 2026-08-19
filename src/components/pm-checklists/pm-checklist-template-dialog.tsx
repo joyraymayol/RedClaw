@@ -92,8 +92,8 @@ export function PmChecklistTemplateDialog({ template }: { template?: Template })
               <DialogHeader>
                 <DialogTitle>Delete &quot;{template.name}&quot;?</DialogTitle>
                 <DialogDescription>
-                  This removes the checklist and its items. Machines using it as
-                  their default lose the assignment; already-created PM tickets
+                  This removes the checklist and its items. Machines it&apos;s
+                  attached to lose that assignment; already-created PM tickets
                   keep their snapshot.
                 </DialogDescription>
               </DialogHeader>

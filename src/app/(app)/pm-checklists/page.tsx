@@ -6,6 +6,7 @@ import {
   ChevronsUpDownIcon,
 } from "lucide-react";
 
+import { PmChecklistAssetsDialog } from "@/components/pm-checklists/pm-checklist-assets-dialog";
 import { PmChecklistItemDialog } from "@/components/pm-checklists/pm-checklist-item-dialog";
 import { PmChecklistTemplateDialog } from "@/components/pm-checklists/pm-checklist-template-dialog";
 import { PmChecklistTemplateTableRow } from "@/components/pm-checklists/pm-checklist-template-table-row";
@@ -38,6 +39,7 @@ const SORT_COLUMNS: Record<
 > = {
   name: (dir) => ({ name: dir }),
   tasks: (dir) => ({ items: { _count: dir } }),
+  assets: (dir) => ({ assetAssignments: { _count: dir } }),
 };
 
 const DEFAULT_SORT = "name";
@@ -46,6 +48,7 @@ const DEFAULT_DIR: SortDir = "asc";
 const SORT_FIELDS: SortField[] = [
   { value: "name", label: "Name" },
   { value: "tasks", label: "Tasks" },
+  { value: "assets", label: "Assets" },
 ];
 
 type PageState = {
@@ -143,14 +146,27 @@ export default async function PmChecklistsPage({
   const totalPages = Math.max(1, Math.ceil(total / perPage));
   const page = Math.min(Math.max(Math.floor(Number(params.page)) || 1, 1), totalPages);
 
-  const templates = await prisma.pmChecklistTemplate.findMany({
-    where,
-    orderBy:
-      view === "table" ? [SORT_COLUMNS[sort](dir), { id: "asc" }] : { name: "asc" },
-    skip: (page - 1) * perPage,
-    take: perPage,
-    include: { items: { orderBy: { sortOrder: "asc" } } },
-  });
+  const [templates, allAssets] = await Promise.all([
+    prisma.pmChecklistTemplate.findMany({
+      where,
+      orderBy:
+        view === "table" ? [SORT_COLUMNS[sort](dir), { id: "asc" }] : { name: "asc" },
+      skip: (page - 1) * perPage,
+      take: perPage,
+      include: {
+        items: { orderBy: { sortOrder: "asc" } },
+        assetAssignments: {
+          orderBy: { addedAt: "asc" },
+          select: { asset: { select: { id: true, assetCode: true, name: true } } },
+        },
+      },
+    }),
+    prisma.asset.findMany({
+      where: { status: { not: "RETIRED" } },
+      orderBy: { assetCode: "asc" },
+      select: { id: true, assetCode: true, name: true },
+    }),
+  ]);
 
   const rangeStart = total === 0 ? 0 : (page - 1) * perPage + 1;
   const rangeEnd = Math.min(page * perPage, total);
@@ -161,8 +177,10 @@ export default async function PmChecklistsPage({
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">PM checklists</h1>
           <p className="text-sm text-muted-foreground">
-            Reusable preventive-maintenance task lists. Attach one to a machine
-            as its default — it&apos;s snapshotted onto each new PM ticket.
+            Reusable preventive-maintenance task lists. Attach one to any
+            number of machines — whoever raises a PM ticket picks one of the
+            checklists attached to that machine, and it&apos;s snapshotted
+            onto the ticket.
           </p>
         </div>
         <PmChecklistTemplateDialog />
@@ -209,9 +227,29 @@ export default async function PmChecklistsPage({
                   )}
                 </div>
                 <div className="flex items-center gap-1">
+                  <PmChecklistAssetsDialog
+                    templateId={t.id}
+                    allAssets={allAssets}
+                    currentAssetIds={t.assetAssignments.map((a) => a.asset.id)}
+                  />
                   <PmChecklistItemDialog templateId={t.id} />
                   <PmChecklistTemplateDialog template={t} />
                 </div>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-1.5 border-t pt-3">
+                {t.assetAssignments.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">No assets attached.</p>
+                ) : (
+                  t.assetAssignments.map(({ asset }) => (
+                    <span
+                      key={asset.id}
+                      className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+                    >
+                      {asset.assetCode}
+                    </span>
+                  ))
+                )}
               </div>
 
               {t.items.length > 0 ? (
@@ -254,12 +292,15 @@ export default async function PmChecklistsPage({
                 <SortableHead column="tasks" state={state}>
                   Tasks
                 </SortableHead>
+                <SortableHead column="assets" state={state}>
+                  Assets
+                </SortableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {templates.map((t) => (
-                <PmChecklistTemplateTableRow key={t.id} template={t} />
+                <PmChecklistTemplateTableRow key={t.id} template={t} allAssets={allAssets} />
               ))}
             </TableBody>
           </Table>

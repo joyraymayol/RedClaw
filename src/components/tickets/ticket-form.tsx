@@ -61,6 +61,7 @@ export function TicketForm({
   solutions,
   allowedTypes,
   productsByAsset,
+  checklistsByAsset,
 }: {
   categories: CategoryOption[];
   assets: AssetOption[];
@@ -70,6 +71,8 @@ export function TicketForm({
   allowedTypes: TicketType[];
   /** Per-asset product capabilities — for the MACHINE_SETUP target-mold picker. */
   productsByAsset: Record<string, { id: string; name: string }[]>;
+  /** Per-asset linked PM checklists — for the PREVENTIVE_MAINTENANCE checklist picker. */
+  checklistsByAsset: Record<string, { id: string; name: string }[]>;
 }) {
   const [state, formAction, pending] = useActionState<TicketActionState, FormData>(
     createTicket,
@@ -81,6 +84,7 @@ export function TicketForm({
   const [problemTypeId, setProblemTypeId] = useState("");
   const [solutionId, setSolutionId] = useState("");
   const [targetProductId, setTargetProductId] = useState("");
+  const [pmChecklistTemplateId, setPmChecklistTemplateId] = useState("");
   const [priority, setPriority] = useState<TicketPriority | "">("MEDIUM");
 
   const assetsInCategory = useMemo(
@@ -96,6 +100,24 @@ export function TicketForm({
     () => Object.fromEntries(targetProducts.map((p) => [p.id, p.name])),
     [targetProducts]
   );
+
+  const checklists = useMemo(
+    () => (assetId ? checklistsByAsset[assetId] ?? [] : []),
+    [checklistsByAsset, assetId]
+  );
+  const checklistItems = useMemo(
+    () => Object.fromEntries(checklists.map((c) => [c.id, c.name])),
+    [checklists]
+  );
+
+  /** Selects the asset, resetting fields that depend on it — and
+      auto-picking the checklist when the asset carries exactly one. */
+  function selectAsset(next: string) {
+    setAssetId(next);
+    setTargetProductId("");
+    const nextChecklists = next ? (checklistsByAsset[next] ?? []) : [];
+    setPmChecklistTemplateId(nextChecklists.length === 1 ? nextChecklists[0].id : "");
+  }
 
   const matchingSolutions = useMemo(() => {
     if (!problemTypeId) return [];
@@ -176,8 +198,7 @@ export function TicketForm({
                 onValueChange={(v) => {
                   const next = v ?? "";
                   setCategoryId(next);
-                  setAssetId("");
-                  setTargetProductId("");
+                  selectAsset("");
                 }}
                 required
               >
@@ -197,8 +218,7 @@ export function TicketForm({
                   label="category"
                   onClear={() => {
                     setCategoryId("");
-                    setAssetId("");
-                    setTargetProductId("");
+                    selectAsset("");
                   }}
                 />
               )}
@@ -211,10 +231,7 @@ export function TicketForm({
                 name="assetId"
                 items={assetItems}
                 value={assetId}
-                onValueChange={(v) => {
-                  setAssetId(v ?? "");
-                  setTargetProductId("");
-                }}
+                onValueChange={(v) => selectAsset(v ?? "")}
                 disabled={!categoryId}
                 required
               >
@@ -230,13 +247,7 @@ export function TicketForm({
                 </SelectContent>
               </Select>
               {assetId && (
-                <ClearSelectButton
-                  label="asset"
-                  onClear={() => {
-                    setAssetId("");
-                    setTargetProductId("");
-                  }}
-                />
+                <ClearSelectButton label="asset" onClear={() => selectAsset("")} />
               )}
             </div>
           </div>
@@ -274,6 +285,44 @@ export function TicketForm({
                 <ClearSelectButton
                   label="target product"
                   onClear={() => setTargetProductId("")}
+                />
+              )}
+            </div>
+          </div>
+        )}
+
+        {type === "PREVENTIVE_MAINTENANCE" && assetId && (
+          <div className="space-y-2">
+            <Label htmlFor="pmChecklistTemplateId">PM checklist</Label>
+            <div className="relative">
+              <Select
+                name="pmChecklistTemplateId"
+                items={checklistItems}
+                value={pmChecklistTemplateId}
+                onValueChange={(v) => setPmChecklistTemplateId(v ?? "")}
+                disabled={checklists.length === 0}
+              >
+                <SelectTrigger id="pmChecklistTemplateId" className="w-full">
+                  <SelectValue
+                    placeholder={
+                      checklists.length === 0
+                        ? "No checklist attached to this asset"
+                        : "Optional — which checklist to work through"
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {checklists.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {pmChecklistTemplateId && (
+                <ClearSelectButton
+                  label="PM checklist"
+                  onClear={() => setPmChecklistTemplateId("")}
                 />
               )}
             </div>

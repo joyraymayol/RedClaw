@@ -239,55 +239,54 @@ model AssetType {
 }
 
 model Asset {
-  id                    String      @id @default(uuid())
-  assetCode             String      @unique // e.g. "CNC-014"
-  name                  String
-  categoryId            String
-  typeId                String?
-  location              String?
-  status                AssetStatus @default(OPERATIONAL)
-  serialNumber          String?
-  manufacturer          String?
-  model                 String?
-  purchaseDate          DateTime?
-  installedAt           DateTime?
-  commissionedAt        DateTime?
-  warrantyExpiresAt     DateTime?
-  retiredAt             DateTime?
-  parentAssetId         String?
-  currentProductId      String?
-  pmChecklistTemplateId String? // default PM checklist snapshotted onto new PM tickets
-  notes                 String?
-  createdAt             DateTime    @default(now())
-  updatedAt             DateTime    @updatedAt
+  id                String      @id @default(uuid())
+  assetCode         String      @unique // e.g. "CNC-014"
+  name              String
+  categoryId        String
+  typeId            String?
+  location          String?
+  status            AssetStatus @default(OPERATIONAL)
+  serialNumber      String?
+  manufacturer      String?
+  model             String?
+  purchaseDate      DateTime?
+  installedAt       DateTime?
+  commissionedAt    DateTime?
+  warrantyExpiresAt DateTime?
+  retiredAt         DateTime?
+  parentAssetId     String?
+  currentProductId  String?
+  notes             String?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
 
-  category            AssetCategory        @relation(fields: [categoryId], references: [id])
-  type                AssetType?           @relation(fields: [typeId], references: [id])
-  parentAsset         Asset?               @relation("AssetParent", fields: [parentAssetId], references: [id])
-  childAssets         Asset[]              @relation("AssetParent")
-  currentProduct      Product?             @relation("CurrentProduct", fields: [currentProductId], references: [id])
-  pmChecklistTemplate PmChecklistTemplate? @relation(fields: [pmChecklistTemplateId], references: [id])
+  category       AssetCategory @relation(fields: [categoryId], references: [id])
+  type           AssetType?    @relation(fields: [typeId], references: [id])
+  parentAsset    Asset?        @relation("AssetParent", fields: [parentAssetId], references: [id])
+  childAssets    Asset[]       @relation("AssetParent")
+  currentProduct Product?      @relation("CurrentProduct", fields: [currentProductId], references: [id])
 
-  ticketFlags         TicketAsset[]
-  solutions           Solution[]
-  schedules           MaintenanceSchedule[]
-  downtimeLogs        DowntimeLog[]
-  usageLogs           AssetUsageLog[]
-  productCapabilities AssetProduct[]
-  productChanges      ProductChangeLog[]
-  productionPlanRows  ProductionPlanRow[]
+  ticketFlags          TicketAsset[]
+  solutions            Solution[]
+  schedules            MaintenanceSchedule[]
+  downtimeLogs         DowntimeLog[]
+  usageLogs            AssetUsageLog[]
+  productCapabilities  AssetProduct[]
+  productChanges       ProductChangeLog[]
+  productionPlanRows   ProductionPlanRow[]
+  checklistAssignments AssetPmChecklistTemplate[]
 
   @@index([categoryId])
   @@index([status])
   @@index([parentAssetId])
   @@index([currentProductId])
-  @@index([pmChecklistTemplateId])
 }
 
 // A reusable Preventive-Maintenance checklist prepared by the Maintenance
-// Head/Supervisor, attachable to one or many machines. Its items are
-// snapshotted onto a PM ticket at creation (TicketChecklistResult) so later
-// template edits never rewrite historical tickets.
+// Head/Supervisor, attachable to many machines (and a machine can carry many
+// checklists — see AssetPmChecklistTemplate). Its items are snapshotted onto
+// a PM ticket at creation (TicketChecklistResult) so later template edits
+// never rewrite historical tickets.
 model PmChecklistTemplate {
   id          String   @id @default(uuid())
   name        String   @unique
@@ -295,8 +294,24 @@ model PmChecklistTemplate {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  items  PmChecklistTemplateItem[]
-  assets Asset[]
+  items            PmChecklistTemplateItem[]
+  assetAssignments AssetPmChecklistTemplate[]
+  tickets          Ticket[]
+}
+
+// Join table: which PM checklist templates apply to which assets (many-to-many).
+model AssetPmChecklistTemplate {
+  id         String   @id @default(uuid())
+  assetId    String
+  templateId String
+  addedAt    DateTime @default(now())
+
+  asset    Asset               @relation(fields: [assetId], references: [id])
+  template PmChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, templateId])
+  @@index([assetId])
+  @@index([templateId])
 }
 
 model PmChecklistTemplateItem {
@@ -369,22 +384,23 @@ model SlaPolicy {
 }
 
 model Ticket {
-  id                  String         @id @default(uuid())
-  ticketNumber        String         @unique // e.g. "TKT-2026-0341" — sequence-backed, formatted at insert time
-  title               String
-  description         String
-  requesterId         String
-  problemTypeId       String?
-  suggestedSolutionId String? // picked at creation time, if applicable
-  priority            TicketPriority @default(MEDIUM)
-  status              TicketStatus   @default(OPEN)
-  type                TicketType     @default(MAINTENANCE)
-  source              TicketSource   @default(MANUAL)
-  scheduleId          String? // set if source = PREVENTIVE
-  holdReason          HoldReason? // set while ON_HOLD, cleared on resume
-  reopenCount         Int            @default(0)
-  productionPlanRowId String? // set for MACHINE_SETUP tickets spun off a Production Plan row
-  targetProductId     String? // the mold/product to switch the machine to on QA close (MACHINE_SETUP)
+  id                    String         @id @default(uuid())
+  ticketNumber          String         @unique // e.g. "TKT-2026-0341" — sequence-backed, formatted at insert time
+  title                 String
+  description           String
+  requesterId           String
+  problemTypeId         String?
+  suggestedSolutionId   String? // picked at creation time, if applicable
+  priority              TicketPriority @default(MEDIUM)
+  status                TicketStatus   @default(OPEN)
+  type                  TicketType     @default(MAINTENANCE)
+  source                TicketSource   @default(MANUAL)
+  scheduleId            String? // set if source = PREVENTIVE
+  holdReason            HoldReason? // set while ON_HOLD, cleared on resume
+  reopenCount           Int            @default(0)
+  productionPlanRowId   String? // set for MACHINE_SETUP tickets spun off a Production Plan row
+  targetProductId       String? // the mold/product to switch the machine to on QA close (MACHINE_SETUP)
+  pmChecklistTemplateId String? // which checklist the requester picked (PREVENTIVE_MAINTENANCE) — display pointer only; TicketChecklistResult is the actual snapshot
 
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -397,12 +413,13 @@ model Ticket {
   closedAt     DateTime? // supervisor closed
   cancelledAt  DateTime?
 
-  requester         User                 @relation("Requester", fields: [requesterId], references: [id])
-  problemType       ProblemType?         @relation(fields: [problemTypeId], references: [id])
-  suggestedSolution Solution?            @relation(fields: [suggestedSolutionId], references: [id])
-  schedule          MaintenanceSchedule? @relation(fields: [scheduleId], references: [id])
-  productionPlanRow ProductionPlanRow?   @relation(fields: [productionPlanRowId], references: [id])
-  targetProduct     Product?             @relation("TicketTargetProduct", fields: [targetProductId], references: [id])
+  requester           User                 @relation("Requester", fields: [requesterId], references: [id])
+  problemType         ProblemType?         @relation(fields: [problemTypeId], references: [id])
+  suggestedSolution   Solution?            @relation(fields: [suggestedSolutionId], references: [id])
+  schedule            MaintenanceSchedule? @relation(fields: [scheduleId], references: [id])
+  productionPlanRow   ProductionPlanRow?   @relation(fields: [productionPlanRowId], references: [id])
+  targetProduct       Product?             @relation("TicketTargetProduct", fields: [targetProductId], references: [id])
+  pmChecklistTemplate PmChecklistTemplate? @relation(fields: [pmChecklistTemplateId], references: [id])
 
   remarks          TicketRemark[]
   attachments      TicketAttachment[]

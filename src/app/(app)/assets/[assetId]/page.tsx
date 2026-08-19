@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { AssetChecklistsCard } from "@/components/assets/asset-checklists-card";
 import { AssetFormDialog } from "@/components/assets/asset-form-dialog";
 import { AssetProductsCard } from "@/components/assets/asset-products-card";
 import { AssetQrBlock } from "@/components/assets/asset-qr-block";
@@ -76,6 +77,10 @@ export default async function AssetDetailPage({
         orderBy: { addedAt: "asc" },
         select: { product: { select: { id: true, name: true } } },
       },
+      checklistAssignments: {
+        orderBy: { addedAt: "asc" },
+        select: { template: { select: { id: true, name: true } } },
+      },
       productChanges: {
         orderBy: { changedAt: "desc" },
         take: 20,
@@ -142,7 +147,7 @@ export default async function AssetDetailPage({
     return query ? `/assets/${assetId}?${query}` : `/assets/${assetId}`;
   }
 
-  const [categories, types, allAssets, allProducts, checklistTemplates] = canManage
+  const [categories, types, allAssets, allProducts, allChecklistTemplates] = canManage
     ? await Promise.all([
         prisma.assetCategory.findMany({
           orderBy: { name: "asc" },
@@ -195,7 +200,6 @@ export default async function AssetDetailPage({
               categories={categories}
               types={types}
               assets={allAssets}
-              checklistTemplates={checklistTemplates}
             />
           </div>
         )}
@@ -269,6 +273,13 @@ export default async function AssetDetailPage({
           }))}
         />
       )}
+
+      <AssetChecklistsCard
+        assetId={asset.id}
+        canManage={canManage}
+        allTemplates={allChecklistTemplates}
+        templates={asset.checklistAssignments.map((a) => a.template)}
+      />
 
       {asset.childAssets.length > 0 && (
         <div className="space-y-2">

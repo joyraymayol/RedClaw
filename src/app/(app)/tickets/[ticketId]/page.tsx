@@ -58,6 +58,7 @@ export default async function TicketDetailPage({
       problemType: { select: { name: true } },
       suggestedSolution: { select: { title: true } },
       targetProduct: { select: { name: true } },
+      pmChecklistTemplate: { select: { name: true } },
       productionPlanRow: { select: { plan: { select: { id: true, formNumber: true } } } },
       statusHistory: {
         orderBy: { createdAt: "asc" },
@@ -180,6 +181,7 @@ export default async function TicketDetailPage({
             <div className="space-y-3 rounded-lg border p-4">
               <h2 className="text-sm font-medium text-muted-foreground">
                 Preventive-maintenance checklist
+                {ticket.pmChecklistTemplate && ` · ${ticket.pmChecklistTemplate.name}`}
               </h2>
               <TicketChecklistCard
                 ticketId={ticket.id}

@@ -21,5 +21,17 @@ export const checklistResultSchema = z.object({
   remark: optionalText(500),
 });
 
+/** Asset -> checklists it carries (asset-side edit of the many-to-many). */
+export const assetChecklistsSchema = z.object({
+  assetId: z.string().min(1),
+  templateIds: z.array(z.string().min(1)).transform((ids) => [...new Set(ids)]),
+});
+
+/** Checklist -> assets it applies to (template-side edit of the many-to-many). */
+export const templateAssetsSchema = z.object({
+  templateId: z.string().min(1),
+  assetIds: z.array(z.string().min(1)).transform((ids) => [...new Set(ids)]),
+});
+
 export type PmChecklistTemplateInput = z.infer<typeof pmChecklistTemplateSchema>;
 export type PmChecklistItemInput = z.infer<typeof pmChecklistItemSchema>;
