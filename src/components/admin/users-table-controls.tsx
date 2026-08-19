@@ -2,8 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Loader2Icon, SearchIcon } from "lucide-react";
+import { Columns3Icon, Loader2Icon, SearchIcon } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -15,6 +22,10 @@ import {
 import {
   DEFAULT_PER_PAGE,
   PER_PAGE_OPTIONS,
+  parseHiddenColumns,
+  SHOW_ALL_COLUMNS,
+  USER_TABLE_COLUMNS,
+  type UserColumnKey,
 } from "@/lib/constants/users-table";
 
 /** Replace the URL with updated params, dropping `page` so a new
@@ -64,7 +75,7 @@ export function UsersSearch() {
   }
 
   return (
-    <div className="relative w-full sm:max-w-xs">
+    <div className="relative w-full sm:w-80">
       <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
         type="search"
@@ -108,6 +119,48 @@ export function PerPageSelect() {
           ))}
         </SelectContent>
       </Select>
+    </div>
+  );
+}
+
+export function ColumnsToggle() {
+  const searchParams = useSearchParams();
+  const navigate = useParamNavigation();
+  const hidden = parseHiddenColumns(searchParams.get("hide"));
+
+  function toggle(key: UserColumnKey, visible: boolean) {
+    const next = new Set(hidden);
+    if (visible) next.delete(key);
+    else next.add(key);
+    navigate({ hide: next.size === 0 ? SHOW_ALL_COLUMNS : [...next].join(",") });
+  }
+
+  return (
+    // The toggle only affects columns once the viewport is wide enough to
+    // show them (see the `hidden lg:table-cell` classes in the users
+    // table); below that, it wouldn't visibly do anything.
+    <div className="hidden lg:block">
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button variant="outline" size="sm">
+              <Columns3Icon className="size-4" />
+              Columns
+            </Button>
+          }
+        />
+        <DropdownMenuContent align="end">
+          {USER_TABLE_COLUMNS.map((col) => (
+            <DropdownMenuCheckboxItem
+              key={col.key}
+              checked={!hidden.has(col.key)}
+              onCheckedChange={(visible) => toggle(col.key, visible)}
+            >
+              {col.label}
+            </DropdownMenuCheckboxItem>
+          ))}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }

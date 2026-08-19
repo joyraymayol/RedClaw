@@ -26,6 +26,7 @@ import { ListNavPending, ListNavProvider } from "@/components/ui/list-nav-contex
 import { PaginationBar } from "@/components/ui/pagination-bar";
 import { PerPageSelect } from "@/components/ui/per-page-select";
 import { Skeleton } from "@/components/ui/skeleton";
+import { SortButton, type SortField } from "@/components/ui/sort-button";
 import {
   Table,
   TableBody,
@@ -99,6 +100,7 @@ type SortDir = "asc" | "desc";
 
 const SORT_COLUMNS: Record<string, (dir: SortDir) => Prisma.TicketOrderByWithRelationInput> = {
   ticketNumber: (dir) => ({ ticketNumber: dir }),
+  title: (dir) => ({ title: dir }),
   priority: (dir) => ({ priority: dir }),
   status: (dir) => ({ status: dir }),
   created: (dir) => ({ createdAt: dir }),
@@ -109,6 +111,16 @@ const SORT_COLUMNS: Record<string, (dir: SortDir) => Prisma.TicketOrderByWithRel
 // renders as actively sorted instead of looking unsorted.
 const DEFAULT_SORT = "created";
 const DEFAULT_DIR: SortDir = "desc";
+
+// Mirrors SORT_COLUMNS — feeds the desktop Sort button, which is just an
+// alternate way to set the same sort/dir params the column headers set.
+const SORT_FIELDS: SortField[] = [
+  { value: "created", label: "Raised date" },
+  { value: "title", label: "Title" },
+  { value: "priority", label: "Priority" },
+  { value: "ticketNumber", label: "Ticket #" },
+  { value: "status", label: "Status" },
+];
 
 const TICKET_TYPES = Object.keys(TICKET_TYPE_LABELS) as TicketType[];
 
@@ -515,7 +527,14 @@ export default async function TicketsPage({
                 );
               })}
             </div>
-            <DateRangeFilter label="Raised date" resetParams={["page"]} />
+            <div className="flex items-center gap-2">
+              <DateRangeFilter label="Raised date" resetParams={["page"]} />
+              <SortButton
+                fields={SORT_FIELDS}
+                defaultSort={DEFAULT_SORT}
+                defaultDir={DEFAULT_DIR}
+              />
+            </div>
           </div>
 
           <TicketFilterBar
@@ -597,7 +616,9 @@ export default async function TicketsPage({
                       <SortableHead column="ticketNumber" state={state}>
                         Ticket
                       </SortableHead>
-                      <TableHead>Title</TableHead>
+                      <SortableHead column="title" state={state}>
+                        Title
+                      </SortableHead>
                       <TableHead className="hidden md:table-cell">Asset</TableHead>
                       <TableHead className="hidden lg:table-cell">Technician</TableHead>
                       <SortableHead column="priority" state={state}>

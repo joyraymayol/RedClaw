@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useListNav } from "@/components/ui/list-nav-context";
 
 type SortDir = "asc" | "desc";
 
@@ -17,6 +18,7 @@ type SortDir = "asc" | "desc";
 // desktop still exposes per-column asc/desc via SortableHead.
 const SORT_OPTIONS: { value: string; dir: SortDir; label: string }[] = [
   { value: "created", dir: "desc", label: "Raised date" },
+  { value: "title", dir: "asc", label: "Title" },
   { value: "priority", dir: "desc", label: "Priority" },
   { value: "ticketNumber", dir: "desc", label: "Ticket #" },
   { value: "status", dir: "asc", label: "Status" },
@@ -34,6 +36,7 @@ export function TicketSortSelect() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const nav = useListNav();
   const current = searchParams.get("sort") ?? DEFAULT_SORT;
 
   return (
@@ -47,12 +50,24 @@ export function TicketSortSelect() {
           if (!option) return;
           const params = new URLSearchParams(searchParams);
           params.delete("page");
-          if (option.value === DEFAULT_SORT) params.delete("sort");
-          else params.set("sort", option.value);
-          if (option.dir === DEFAULT_DIR) params.delete("dir");
-          else params.set("dir", option.dir);
+          // A missing `dir` is read as "asc" server-side whenever `sort` is
+          // present — it only falls back to DEFAULT_DIR when `sort` is also
+          // absent. Comparing dir to DEFAULT_DIR on its own (independent of
+          // whether sort is at its default) would drop the param for any
+          // "desc" option here, since DEFAULT_DIR is itself "desc", quietly
+          // turning e.g. "Priority" (dir: desc) into ascending order.
+          if (option.value === DEFAULT_SORT && option.dir === DEFAULT_DIR) {
+            params.delete("sort");
+            params.delete("dir");
+          } else {
+            params.set("sort", option.value);
+            if (option.dir === "desc") params.set("dir", "desc");
+            else params.delete("dir");
+          }
           const query = params.toString();
-          router.replace(query ? `${pathname}?${query}` : pathname);
+          const target = query ? `${pathname}?${query}` : pathname;
+          if (nav) nav.navigate(target);
+          else router.replace(target);
         }}
       >
         <SelectTrigger size="sm" aria-label="Sort tickets">

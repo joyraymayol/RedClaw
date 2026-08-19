@@ -10,7 +10,6 @@ import {
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
@@ -32,9 +31,11 @@ function roleLabel(role: UserRole | null) {
 export function AppSidebar({
   role,
   userName,
+  avatarUrl,
 }: {
   role: UserRole | null;
   userName?: string | null;
+  avatarUrl?: string | null;
 }) {
   const pathname = usePathname();
   const links = NAV_LINKS.filter((l) => !l.roles || (role && l.roles.includes(role)));
@@ -49,9 +50,21 @@ export function AppSidebar({
               size="lg"
               className="cursor-default hover:bg-transparent active:bg-transparent"
             >
-              <span className="flex aspect-square size-8 items-center justify-center rounded-md bg-primary text-xs font-semibold text-primary-foreground">
-                {initials(userName)}
-              </span>
+              {avatarUrl ? (
+                // Google avatar URL; next/image would need a remotePatterns
+                // entry for a one-off 32px image.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={avatarUrl}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  className="aspect-square size-8 shrink-0 rounded-md object-cover"
+                />
+              ) : (
+                <span className="flex aspect-square size-8 items-center justify-center rounded-md bg-primary text-xs font-semibold text-primary-foreground">
+                  {initials(userName)}
+                </span>
+              )}
               <span className="grid flex-1 text-left leading-tight">
                 <span className="truncate font-medium">{userName ?? "RedClaw"}</span>
                 <span className="truncate text-xs text-muted-foreground">
@@ -65,7 +78,6 @@ export function AppSidebar({
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {links.map((l) => {

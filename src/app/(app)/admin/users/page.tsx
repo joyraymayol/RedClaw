@@ -9,12 +9,16 @@ import {
 import { UserActionsDialog } from "@/components/admin/user-actions-dialog";
 import { UserStatusBadge } from "@/components/admin/user-status-badge";
 import {
+  ColumnsToggle,
   PerPageSelect,
   UsersSearch,
 } from "@/components/admin/users-table-controls";
+import { SortButton, type SortField } from "@/components/ui/sort-button";
 import {
   DEFAULT_PER_PAGE,
+  parseHiddenColumns,
   PER_PAGE_OPTIONS,
+  USER_TABLE_COLUMNS,
 } from "@/lib/constants/users-table";
 import {
   Table,
@@ -61,12 +65,22 @@ const SORT_COLUMNS: Record<
   joined: (dir) => ({ createdAt: dir }),
 };
 
+const SORT_FIELDS: SortField[] = [
+  { value: "name", label: "Name" },
+  { value: "email", label: "Email" },
+  { value: "department", label: "Department" },
+  { value: "position", label: "Position" },
+  { value: "status", label: "Status" },
+  { value: "joined", label: "Joined" },
+];
+
 type TableState = {
   filter: string;
   q: string;
   perPage: number;
   sort: string | null;
   dir: SortDir;
+  hide: string | null;
 };
 
 /** Query string for the given state, omitting defaults. `page` resets
@@ -81,6 +95,7 @@ function tableHref(state: TableState, page?: number) {
     params.set("sort", state.sort);
     if (state.dir === "desc") params.set("dir", "desc");
   }
+  if (state.hide) params.set("hide", state.hide);
   if (page && page > 1) params.set("page", String(page));
   const query = params.toString();
   return query ? `/admin/users?${query}` : "/admin/users";
@@ -142,6 +157,7 @@ export default async function AdminUsersPage({
     perPage?: string;
     sort?: string;
     dir?: string;
+    hide?: string;
   }>;
 }) {
   const admin = await requireRole("ADMIN", "HEAD");
@@ -157,7 +173,11 @@ export default async function AdminUsersPage({
     : DEFAULT_PER_PAGE;
   const sort = params.sort && params.sort in SORT_COLUMNS ? params.sort : null;
   const dir: SortDir = params.dir === "desc" ? "desc" : "asc";
-  const state: TableState = { filter: filter.key, q, perPage, sort, dir };
+  const hide = params.hide ?? null;
+  const state: TableState = { filter: filter.key, q, perPage, sort, dir, hide };
+  const hiddenCols = parseHiddenColumns(hide);
+  const visibleColCount =
+    3 + USER_TABLE_COLUMNS.filter((c) => !hiddenCols.has(c.key)).length;
 
   // department is now an enum, so match by label/value rather than ILIKE.
   const matchedDepartments = q
@@ -168,24 +188,29 @@ export default async function AdminUsersPage({
       )
     : [];
 
-  const where: Prisma.UserWhereInput = {
-    ...filter.where,
-    ...(q && {
-      OR: [
-        { name: { contains: q, mode: "insensitive" } },
-        { email: { contains: q, mode: "insensitive" } },
-        ...(matchedDepartments.length > 0
-          ? [{ department: { in: matchedDepartments } }]
-          : []),
-        { position: { contains: q, mode: "insensitive" } },
-      ],
-    }),
-  };
+  const qWhere: Prisma.UserWhereInput = q
+    ? {
+        OR: [
+          { name: { contains: q, mode: "insensitive" } },
+          { email: { contains: q, mode: "insensitive" } },
+          ...(matchedDepartments.length > 0
+            ? [{ department: { in: matchedDepartments } }]
+            : []),
+          { position: { contains: q, mode: "insensitive" } },
+        ],
+      }
+    : {};
 
-  const [total, pendingCount] = await Promise.all([
+  const where: Prisma.UserWhereInput = { ...filter.where, ...qWhere };
+
+  const [total, pendingCount, filterCounts] = await Promise.all([
     prisma.user.count({ where }),
     prisma.user.count({ where: { status: "PENDING_APPROVAL" } }),
+    // Per-tab counts scoped by the current search but not by the tab's own
+    // status filter, so switching tabs doesn't make the numbers jump around.
+    Promise.all(FILTERS.map((f) => prisma.user.count({ where: { ...f.where, ...qWhere } }))),
   ]);
+  const countByFilter = new Map(FILTERS.map((f, i) => [f.key, filterCounts[i]]));
 
   const totalPages = Math.max(1, Math.ceil(total / perPage));
   const pageParam = Math.floor(Number(params.page));
@@ -225,73 +250,107 @@ export default async function AdminUsersPage({
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-1">
-          {FILTERS.map((f) => (
-            <Link
-              key={f.key}
-              href={tableHref({ ...state, filter: f.key })}
-              className={cn(
-                "rounded-md px-2.5 py-1.5 text-sm transition-colors",
-                f.key === filter.key
-                  ? "bg-muted font-medium text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {f.label}
-            </Link>
-          ))}
+          {FILTERS.map((f) => {
+            const active = f.key === filter.key;
+            return (
+              <Link
+                key={f.key}
+                href={tableHref({ ...state, filter: f.key })}
+                className={cn(
+                  "flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition-colors",
+                  active
+                    ? "bg-muted font-medium text-foreground"
+                    : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {f.label}
+                <span
+                  className={cn(
+                    "rounded-full px-1.5 py-0.5 text-xs tabular-nums",
+                    active ? "bg-background" : "bg-muted-foreground/10"
+                  )}
+                >
+                  {countByFilter.get(f.key) ?? 0}
+                </span>
+              </Link>
+            );
+          })}
         </div>
-        <UsersSearch />
+        <div className="flex items-center gap-2">
+          <SortButton fields={SORT_FIELDS} defaultSort="" defaultDir="asc" />
+          <ColumnsToggle />
+          <UsersSearch />
+        </div>
       </div>
 
       <div className="overflow-x-auto rounded-lg border">
-        {/* Narrow screens keep three columns (name+email, status, actions);
-            the rest appear as the viewport widens. Full details and all
-            actions live in the per-row dialog. */}
+        {/* Below `lg`, rows collapse to a card-per-row layout: the Name
+            cell absorbs email/status/department/position as stacked
+            details, and only Name + Actions remain real columns — there
+            isn't room for separate columns without the sticky Actions
+            column overlapping them. Regular columns reappear at `lg`,
+            regardless of the Columns toggle. Full details and all
+            actions also live in the per-row dialog. Actions stays
+            pinned to the right edge so it never scrolls out of view. */}
         <Table className="[&_td]:px-4 [&_td]:py-3 [&_th]:px-4">
           <TableHeader>
             <TableRow>
               <SortableHead column="name" state={state}>
                 Name
               </SortableHead>
+              {!hiddenCols.has("email") && (
+                <SortableHead
+                  column="email"
+                  state={state}
+                  className="hidden lg:table-cell"
+                >
+                  Email
+                </SortableHead>
+              )}
+              {!hiddenCols.has("department") && (
+                <SortableHead
+                  column="department"
+                  state={state}
+                  className="hidden lg:table-cell"
+                >
+                  Department
+                </SortableHead>
+              )}
+              {!hiddenCols.has("position") && (
+                <SortableHead
+                  column="position"
+                  state={state}
+                  className="hidden lg:table-cell"
+                >
+                  Position
+                </SortableHead>
+              )}
               <SortableHead
-                column="email"
-                state={state}
-                className="hidden md:table-cell"
-              >
-                Email
-              </SortableHead>
-              <SortableHead
-                column="department"
+                column="status"
                 state={state}
                 className="hidden lg:table-cell"
               >
-                Department
-              </SortableHead>
-              <SortableHead
-                column="position"
-                state={state}
-                className="hidden lg:table-cell"
-              >
-                Position
-              </SortableHead>
-              <SortableHead column="status" state={state}>
                 Status
               </SortableHead>
-              <SortableHead
-                column="joined"
-                state={state}
-                className="hidden md:table-cell"
-              >
-                Joined
-              </SortableHead>
-              <TableHead className="text-right">Actions</TableHead>
+              {!hiddenCols.has("joined") && (
+                <SortableHead
+                  column="joined"
+                  state={state}
+                  className="hidden lg:table-cell"
+                >
+                  Joined
+                </SortableHead>
+              )}
+              <TableHead className="sticky right-0 border-l bg-background">
+                <div className="w-20 text-center">Actions</div>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {users.length === 0 && (
               <TableRow>
                 <TableCell
-                  colSpan={7}
+                  colSpan={visibleColCount}
                   className="py-10 text-center text-sm text-muted-foreground"
                 >
                   {q
@@ -301,35 +360,59 @@ export default async function AdminUsersPage({
               </TableRow>
             )}
             {users.map((u) => (
-              <TableRow key={u.id}>
-                <TableCell>
+              <TableRow key={u.id} className="group">
+                <TableCell className="align-top lg:align-middle">
                   <div className="font-medium">{u.name}</div>
-                  <div className="font-mono text-xs text-muted-foreground md:hidden">
-                    {u.email}
+                  <div className="mt-1 space-y-1.5 lg:hidden">
+                    <div className="font-mono text-xs text-muted-foreground">
+                      {u.email}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <UserStatusBadge status={u.status} />
+                      {u.role && (
+                        <span className="font-mono text-[10px] text-muted-foreground">
+                          {u.role}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {departmentLabel(u.department)}
+                      {u.position && ` · ${u.position}`}
+                    </div>
                   </div>
                 </TableCell>
-                <TableCell className="hidden font-mono text-xs md:table-cell">
-                  {u.email}
-                </TableCell>
+                {!hiddenCols.has("email") && (
+                  <TableCell className="hidden font-mono text-xs lg:table-cell">
+                    {u.email}
+                  </TableCell>
+                )}
+                {!hiddenCols.has("department") && (
+                  <TableCell className="hidden lg:table-cell">
+                    {departmentLabel(u.department)}
+                  </TableCell>
+                )}
+                {!hiddenCols.has("position") && (
+                  <TableCell className="hidden lg:table-cell">
+                    {u.position ?? "—"}
+                  </TableCell>
+                )}
                 <TableCell className="hidden lg:table-cell">
-                  {departmentLabel(u.department)}
-                </TableCell>
-                <TableCell className="hidden lg:table-cell">
-                  {u.position ?? "—"}
-                </TableCell>
-                <TableCell>
                   <UserStatusBadge status={u.status} />
                   {u.role && (
-                    <span className="ml-1.5 hidden font-mono text-[10px] text-muted-foreground sm:inline">
+                    <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">
                       {u.role}
                     </span>
                   )}
                 </TableCell>
-                <TableCell className="hidden text-xs text-muted-foreground md:table-cell">
-                  {formatDateTime(u.createdAt)}
-                </TableCell>
-                <TableCell className="text-right">
-                  <UserActionsDialog user={u} isSelf={u.id === admin.id} />
+                {!hiddenCols.has("joined") && (
+                  <TableCell className="hidden text-xs text-muted-foreground lg:table-cell">
+                    {formatDateTime(u.createdAt)}
+                  </TableCell>
+                )}
+                <TableCell className="sticky right-0 border-l bg-background align-top group-hover:bg-muted lg:align-middle">
+                  <div className="flex w-20 justify-center">
+                    <UserActionsDialog user={u} isSelf={u.id === admin.id} />
+                  </div>
                 </TableCell>
               </TableRow>
             ))}

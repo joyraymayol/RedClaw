@@ -46,7 +46,7 @@ export default async function AppLayout({
   return (
     <TooltipProvider delay={0}>
       <SidebarProvider defaultOpen={defaultOpen}>
-        <AppSidebar role={user.role} userName={user.name} />
+        <AppSidebar role={user.role} userName={user.name} avatarUrl={user.avatarUrl} />
         <SidebarInset>
           <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
             <SidebarTrigger className="-ml-1" />
