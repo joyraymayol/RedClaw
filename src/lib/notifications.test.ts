@@ -11,6 +11,7 @@ import {
   adminRecipients,
   createNotification,
   maintenanceLeads,
+  maintenanceStaff,
   notifyUsers,
   planApprovers,
   qaLeads,
@@ -111,6 +112,14 @@ describe("recipient resolvers", () => {
         { role: "ADMIN" },
         { department: "MAINTENANCE", role: { in: ["HEAD", "SUPERVISOR"] } },
       ],
+    });
+  });
+
+  it("maintenanceStaff matches every active Maintenance-department user, any role", async () => {
+    await maintenanceStaff(h.tx);
+    expect(h.userFindMany.mock.calls[0][0].where).toEqual({
+      status: "ACTIVE",
+      department: "MAINTENANCE",
     });
   });
 

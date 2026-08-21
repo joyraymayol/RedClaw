@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 
 import { AssetFormDialog } from "@/components/assets/asset-form-dialog";
+import { AssetListCard } from "@/components/assets/asset-list-card";
 import { AssetStatusBadge } from "@/components/assets/asset-status-badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { DebouncedSearchInput } from "@/components/ui/debounced-search-input";
@@ -212,7 +213,7 @@ export default async function AssetsPage({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-1">
+        <div className="hidden flex-wrap items-center gap-1 md:flex">
           <Link
             href={assetsHref({ ...state, category: "" })}
             className={cn(
@@ -244,78 +245,125 @@ export default async function AssetsPage({
             placeholder="Search asset code, name, category…"
             ariaLabel="Search assets"
             resetParams={["page"]}
+            className="w-56 sm:w-72"
           />
           <SortButton fields={SORT_FIELDS} defaultSort={DEFAULT_SORT} defaultDir={DEFAULT_DIR} />
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border">
-        <Table className="[&_td]:px-4 [&_td]:py-3 [&_th]:px-4">
-          <TableHeader>
-            <TableRow>
-              <SortableHead column="assetCode" state={state}>
-                Asset code
-              </SortableHead>
-              <SortableHead column="name" state={state}>
-                Name
-              </SortableHead>
-              <SortableHead column="category" state={state} className="hidden md:table-cell">
-                Category
-              </SortableHead>
-              <SortableHead column="location" state={state} className="hidden md:table-cell">
-                Location
-              </SortableHead>
-              <SortableHead column="status" state={state}>
-                Status
-              </SortableHead>
-              {canManage && <TableHead className="text-right">Edit</TableHead>}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {assets.length === 0 && (
-              <TableRow>
-                <TableCell
-                  colSpan={canManage ? 6 : 5}
-                  className="py-10 text-center text-sm text-muted-foreground"
-                >
-                  {q ? `No assets match "${q}".` : "No assets yet."}
-                </TableCell>
-              </TableRow>
+      {/* Mobile: pill-style category chips, matching the Tickets page's
+          mobile status tabs — wraps instead of scrolling since the category
+          list is admin-defined and can grow past what fits on one line. */}
+      <div className="flex flex-wrap items-center gap-1 md:hidden">
+        <Link
+          href={assetsHref({ ...state, category: "" })}
+          className={cn(
+            "flex items-center rounded-full px-2 py-1 text-xs transition-colors",
+            !category
+              ? "bg-primary/15 font-medium text-primary"
+              : "bg-muted text-muted-foreground"
+          )}
+        >
+          All
+        </Link>
+        {categories.map((c) => (
+          <Link
+            key={c.id}
+            href={assetsHref({ ...state, category: c.id })}
+            className={cn(
+              "flex items-center rounded-full px-2 py-1 text-xs transition-colors",
+              category === c.id
+                ? "bg-primary/15 font-medium text-primary"
+                : "bg-muted text-muted-foreground"
             )}
-            {assets.map((a) => (
-              <TableRow key={a.id}>
-                <TableCell>
-                  <Link
-                    href={`/assets/${a.id}`}
-                    className={cn(buttonVariants({ variant: "outline", size: "xs" }), "font-mono")}
-                  >
-                    {a.assetCode}
-                  </Link>
-                </TableCell>
-                <TableCell>{a.name}</TableCell>
-                <TableCell className="hidden text-muted-foreground md:table-cell">
-                  {a.category.name}
-                </TableCell>
-                <TableCell className="hidden text-muted-foreground md:table-cell">
-                  {a.location ?? "—"}
-                </TableCell>
-                <TableCell>
-                  <AssetStatusBadge status={a.status} />
-                </TableCell>
-                {canManage && (
-                  <TableCell className="text-right">
-                    <AssetFormDialog
-                      asset={a}
-                      categories={categories}
-                      types={types}
-                      assets={allAssets}
-                    />
-                  </TableCell>
-                )}
+          >
+            {c.name}
+          </Link>
+        ))}
+      </div>
+
+      {/* Mobile: card list */}
+      <div className="space-y-3 md:hidden">
+        {assets.length === 0 && (
+          <p className="py-10 text-center text-sm text-muted-foreground">
+            {q ? `No assets match "${q}".` : "No assets yet."}
+          </p>
+        )}
+        {assets.map((a) => (
+          <AssetListCard key={a.id} asset={a} />
+        ))}
+      </div>
+
+      {/* Desktop: unchanged table */}
+      <div className="hidden md:block">
+        <div className="overflow-x-auto rounded-lg border">
+          <Table className="[&_td]:px-4 [&_td]:py-3 [&_th]:px-4">
+            <TableHeader>
+              <TableRow>
+                <SortableHead column="assetCode" state={state}>
+                  Asset code
+                </SortableHead>
+                <SortableHead column="name" state={state}>
+                  Name
+                </SortableHead>
+                <SortableHead column="category" state={state} className="hidden md:table-cell">
+                  Category
+                </SortableHead>
+                <SortableHead column="location" state={state} className="hidden md:table-cell">
+                  Location
+                </SortableHead>
+                <SortableHead column="status" state={state}>
+                  Status
+                </SortableHead>
+                {canManage && <TableHead className="text-right">Edit</TableHead>}
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {assets.length === 0 && (
+                <TableRow>
+                  <TableCell
+                    colSpan={canManage ? 6 : 5}
+                    className="py-10 text-center text-sm text-muted-foreground"
+                  >
+                    {q ? `No assets match "${q}".` : "No assets yet."}
+                  </TableCell>
+                </TableRow>
+              )}
+              {assets.map((a) => (
+                <TableRow key={a.id}>
+                  <TableCell>
+                    <Link
+                      href={`/assets/${a.id}`}
+                      className={cn(buttonVariants({ variant: "outline", size: "xs" }), "font-mono")}
+                    >
+                      {a.assetCode}
+                    </Link>
+                  </TableCell>
+                  <TableCell>{a.name}</TableCell>
+                  <TableCell className="hidden text-muted-foreground md:table-cell">
+                    {a.category.name}
+                  </TableCell>
+                  <TableCell className="hidden text-muted-foreground md:table-cell">
+                    {a.location ?? "—"}
+                  </TableCell>
+                  <TableCell>
+                    <AssetStatusBadge status={a.status} />
+                  </TableCell>
+                  {canManage && (
+                    <TableCell className="text-right">
+                      <AssetFormDialog
+                        asset={a}
+                        categories={categories}
+                        types={types}
+                        assets={allAssets}
+                      />
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
       <PaginationBar

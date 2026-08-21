@@ -4,8 +4,6 @@ import { format } from "date-fns";
 import {
   ArrowDownIcon,
   ArrowUpIcon,
-  ChevronLeftIcon,
-  ChevronRightIcon,
   ChevronsUpDownIcon,
   PlusIcon,
   XIcon,
@@ -16,7 +14,6 @@ import { TicketFilterBar } from "@/components/tickets/ticket-filter-bar";
 import { TicketFilterSheet } from "@/components/tickets/ticket-filter-sheet";
 import { TicketListCard } from "@/components/tickets/ticket-list-card";
 import { TICKET_PRIORITY_LABELS, TicketPriorityBadge } from "@/components/tickets/ticket-priority-badge";
-import { TicketSortSelect } from "@/components/tickets/ticket-sort-select";
 import { TICKET_STATUS_LABELS, TicketStatusBadge } from "@/components/tickets/ticket-status-badge";
 import { TICKET_TYPE_LABELS, TicketTypeBadge } from "@/components/tickets/ticket-type-badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -57,14 +54,16 @@ const ATTENTION_STATUSES: TicketStatus[] = [
 ];
 const DONE_STATUSES: TicketStatus[] = ["CLOSED", "CANCELLED"];
 
-const FILTERS: {
+type FilterDef = {
   key: string;
   label: string;
   /** Display label for the mobile quick-tab row, when it differs from `label`. */
   mobileLabel?: string;
   where?: Prisma.TicketWhereInput;
   countStatuses?: TicketStatus[];
-}[] = [
+};
+
+const BASE_FILTERS: FilterDef[] = [
   { key: "all", label: "All" },
   {
     key: "open",
@@ -87,11 +86,6 @@ const FILTERS: {
   },
   { key: "done", label: "Closed", where: { status: { in: DONE_STATUSES } } },
 ];
-
-// The mobile quick-tab row is a 4-way subset of FILTERS (All/Open/In
-// progress/Closed) — "Needs attention" is still reachable via the Status
-// filter in the sheet, just not pinned as its own tab on small screens.
-const MOBILE_FILTERS = FILTERS.filter((f) => f.key !== "attention");
 
 const TICKET_PRIORITIES = Object.keys(TICKET_PRIORITY_LABELS) as TicketPriority[];
 const TICKET_STATUSES = Object.keys(TICKET_STATUS_LABELS) as TicketStatus[];
@@ -126,6 +120,10 @@ const TICKET_TYPES = Object.keys(TICKET_TYPE_LABELS) as TicketType[];
 
 type TableState = {
   filter: string;
+  /** The filter key this user would land on with no `filter` param at all —
+      "all" for most users, "mine" for a non-lead Maintenance technician. Lets
+      `tableHref` omit the param exactly when it wouldn't change anything. */
+  defaultFilter: string;
   category: string;
   asset: string;
   type: string;
@@ -142,7 +140,7 @@ type TableState = {
 
 function tableHref(state: TableState, page?: number) {
   const params = new URLSearchParams();
-  if (state.filter !== "all") params.set("filter", state.filter);
+  if (state.filter !== state.defaultFilter) params.set("filter", state.filter);
   if (state.category) params.set("category", state.category);
   if (state.asset) params.set("asset", state.asset);
   if (state.type) params.set("type", state.type);
@@ -232,7 +230,34 @@ export default async function TicketsPage({
   const user = await requireActiveUser();
   const params = await searchParams;
 
-  const filter = FILTERS.find((f) => f.key === params.filter) ?? FILTERS[0];
+  // Maintenance-department users (any role) get a "My Tickets" tab — since
+  // anyone in Maintenance can now self-assign, everyone needs a quick way
+  // back to just their own work. Leads (HEAD/ADMIN/SUPERVISOR) default to
+  // "All" like before; everyone else in Maintenance (i.e. technicians)
+  // defaults to "My Tickets" so they land on their own queue, not the firehose.
+  const isMaintenance = user.department === "MAINTENANCE";
+  const isMaintenanceLead =
+    isMaintenance && (user.role === "HEAD" || user.role === "ADMIN" || user.role === "SUPERVISOR");
+  const filters: FilterDef[] = isMaintenance
+    ? [
+        BASE_FILTERS[0],
+        {
+          key: "mine",
+          label: "My Tickets",
+          where: { assignments: { some: { technicianId: user.id, unassignedAt: null } } },
+        },
+        ...BASE_FILTERS.slice(1),
+      ]
+    : BASE_FILTERS;
+  // The mobile quick-tab row is a subset of `filters` (All/[My Tickets]/Open/
+  // In progress/Closed) — "Needs attention" is still reachable via the Status
+  // filter in the sheet, just not pinned as its own tab on small screens.
+  const mobileFilters = filters.filter((f) => f.key !== "attention");
+  const defaultFilterKey = isMaintenance && !isMaintenanceLead ? "mine" : "all";
+  const filter =
+    filters.find((f) => f.key === params.filter) ??
+    filters.find((f) => f.key === defaultFilterKey) ??
+    filters[0];
   const category = params.category?.trim() ?? "";
   const asset = params.asset?.trim() ?? "";
   const type =
@@ -259,6 +284,7 @@ export default async function TicketsPage({
   const dir: SortDir = sortParam ? (params.dir === "desc" ? "desc" : "asc") : DEFAULT_DIR;
   const state: TableState = {
     filter: filter.key,
+    defaultFilter: defaultFilterKey,
     category,
     asset,
     type,
@@ -289,13 +315,22 @@ export default async function TicketsPage({
     }),
   ]);
   // Requesters see their own tickets; technicians see what's assigned to
-  // them; admins/supervisors/head see everything (plan §1 — the page just
-  // narrows what's visible, `can()` is still the real gate on every action).
+  // them, plus (Maintenance ones only) unassigned OPEN/REOPENED tickets they
+  // can self-assign — otherwise there's nothing to click "Assign to me" on;
+  // admins/supervisors/head see everything (plan §1 — the page just narrows
+  // what's visible, `can()` is still the real gate on every action).
   const scope: Prisma.TicketWhereInput =
     user.role === "REQUESTER"
       ? { requesterId: user.id }
       : user.role === "TECHNICIAN"
-        ? { assignments: { some: { technicianId: user.id, unassignedAt: null } } }
+        ? {
+            OR: [
+              { assignments: { some: { technicianId: user.id, unassignedAt: null } } },
+              ...(user.department === "MAINTENANCE"
+                ? [{ status: { in: ["OPEN", "REOPENED"] as TicketStatus[] } }]
+                : []),
+            ],
+          }
         : {};
 
   const createdAt = createdAtRange(fromDate, toDate);
@@ -389,7 +424,9 @@ export default async function TicketsPage({
             {user.role === "REQUESTER"
               ? "Tickets you've raised."
               : user.role === "TECHNICIAN"
-                ? "Tickets assigned to you."
+                ? user.department === "MAINTENANCE"
+                  ? "Tickets assigned to you, plus open ones you can claim."
+                  : "Tickets assigned to you."
                 : "All maintenance tickets."}
           </p>
         </div>
@@ -451,8 +488,8 @@ export default async function TicketsPage({
             </div>
           )}
 
-          <div className="-mx-4 flex items-center gap-1.5 overflow-x-auto px-4">
-            {MOBILE_FILTERS.map((f) => {
+          <div className="-mx-4 flex items-center gap-1 overflow-x-auto px-4">
+            {mobileFilters.map((f) => {
               const active = f.key === filter.key;
               const count =
                 f.key === "done"
@@ -465,7 +502,7 @@ export default async function TicketsPage({
                   key={f.key}
                   href={tableHref({ ...state, filter: f.key })}
                   className={cn(
-                    "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-sm transition-colors",
+                    "flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs transition-colors",
                     active ? "bg-primary/15 font-medium text-primary" : "bg-muted text-muted-foreground"
                   )}
                 >
@@ -473,7 +510,7 @@ export default async function TicketsPage({
                   {count !== undefined && (
                     <span
                       className={cn(
-                        "rounded-full px-1.5 py-0.5 text-xs tabular-nums",
+                        "rounded-full px-1 py-0.5 text-[10px] tabular-nums",
                         active ? "bg-primary/20" : "bg-background"
                       )}
                     >
@@ -489,7 +526,7 @@ export default async function TicketsPage({
             <p className="text-sm text-muted-foreground">
               {total} ticket{total === 1 ? "" : "s"}
             </p>
-            <TicketSortSelect />
+            <SortButton fields={SORT_FIELDS} defaultSort={DEFAULT_SORT} defaultDir={DEFAULT_DIR} />
           </div>
         </div>
 
@@ -498,7 +535,7 @@ export default async function TicketsPage({
         <div className="hidden space-y-4 md:block">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-1">
-              {FILTERS.map((f) => {
+              {filters.map((f) => {
                 const active = f.key === filter.key;
                 const count = f.countStatuses ? sumStatuses(f.countStatuses) : undefined;
                 return (
@@ -576,39 +613,10 @@ export default async function TicketsPage({
               {tickets.map((t) => (
                 <TicketListCard key={t.id} ticket={t} />
               ))}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-center gap-4 pt-1 text-sm">
-                  {page > 1 ? (
-                    <Link
-                      href={tableHref(state, page - 1)}
-                      aria-label="Previous page"
-                      className="text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      <ChevronLeftIcon className="size-4" />
-                    </Link>
-                  ) : (
-                    <ChevronLeftIcon className="size-4 text-muted-foreground/30" />
-                  )}
-                  <span className="text-muted-foreground">
-                    Page {page} of {totalPages}
-                  </span>
-                  {page < totalPages ? (
-                    <Link
-                      href={tableHref(state, page + 1)}
-                      aria-label="Next page"
-                      className="text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      <ChevronRightIcon className="size-4" />
-                    </Link>
-                  ) : (
-                    <ChevronRightIcon className="size-4 text-muted-foreground/30" />
-                  )}
-                </div>
-              )}
             </div>
 
-            {/* Desktop: unchanged table + pagination bar */}
-            <div className="hidden space-y-6 md:block">
+            {/* Desktop: unchanged table */}
+            <div className="hidden md:block">
               <div className="overflow-x-auto rounded-lg border">
                 <Table className="[&_td]:px-4 [&_td]:py-3 [&_th]:px-4">
                   <TableHeader>
@@ -698,20 +706,20 @@ export default async function TicketsPage({
                   </TableBody>
                 </Table>
               </div>
-
-              <PaginationBar
-                total={total}
-                page={page}
-                totalPages={totalPages}
-                rangeStart={rangeStart}
-                rangeEnd={rangeEnd}
-                itemLabel="ticket"
-                hrefFor={(p) => tableHref(state, p)}
-                perPageSelect={
-                  <PerPageSelect options={PER_PAGE_OPTIONS} defaultValue={DEFAULT_PER_PAGE} />
-                }
-              />
             </div>
+
+            <PaginationBar
+              total={total}
+              page={page}
+              totalPages={totalPages}
+              rangeStart={rangeStart}
+              rangeEnd={rangeEnd}
+              itemLabel="ticket"
+              hrefFor={(p) => tableHref(state, p)}
+              perPageSelect={
+                <PerPageSelect options={PER_PAGE_OPTIONS} defaultValue={DEFAULT_PER_PAGE} />
+              }
+            />
           </div>
         </ListNavPending>
       </ListNavProvider>

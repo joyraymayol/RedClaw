@@ -15,7 +15,7 @@ export function PerPageSelect({
   defaultValue,
   paramName = "perPage",
   pageParamName = "page",
-  label = "Rows per page",
+  label = "Items per page",
 }: {
   options: readonly number[];
   defaultValue: number;

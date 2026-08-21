@@ -48,7 +48,15 @@ export const remarkSchema = z.object({
 
 export const holdSchema = z.object({
   ticketId: z.string().min(1),
-  holdReason: z.enum(["WAITING_PARTS", "WAITING_VENDOR", "OTHER"]),
+  holdReason: z.enum([
+    "WAITING_PARTS",
+    "WAITING_VENDOR",
+    "WAITING_EXTERNAL_TECHNICIAN",
+    "WAITING_TOOLS_EQUIPMENT",
+    "PRODUCTION_SCHEDULE_CONFLICT",
+    "FURTHER_DIAGNOSIS_REQUIRED",
+    "OTHER",
+  ]),
   note: z.string().trim().min(1, "Say why you're pausing this").max(500),
 });
 

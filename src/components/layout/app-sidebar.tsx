@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { LogOut } from "lucide-react";
 
 import type { UserRole } from "@/generated/prisma/enums";
 import { NAV_LINKS } from "@/components/layout/nav-links";
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarHeader,
@@ -15,7 +17,9 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar";
+import { signOut } from "@/lib/actions/auth";
 
 function initials(name?: string | null) {
   if (!name) return "RC";
@@ -38,6 +42,7 @@ export function AppSidebar({
   avatarUrl?: string | null;
 }) {
   const pathname = usePathname();
+  const { isMobile, setOpenMobile } = useSidebar();
   const links = NAV_LINKS.filter((l) => !l.roles || (role && l.roles.includes(role)));
 
   return (
@@ -90,6 +95,9 @@ export function AppSidebar({
                       isActive={isActive}
                       tooltip={l.label}
                       render={<Link href={l.href} />}
+                      onClick={() => {
+                        if (isMobile) setOpenMobile(false);
+                      }}
                     >
                       <Icon />
                       <span>{l.label}</span>
@@ -101,6 +109,21 @@ export function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
+
+      {/* Header already carries Sign out on desktop — this only needs to
+          exist for the mobile slide-out sheet, which shares this same tree. */}
+      <SidebarFooter className="md:hidden">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <form action={signOut} suppressHydrationWarning>
+              <SidebarMenuButton type="submit">
+                <LogOut />
+                <span>Sign out</span>
+              </SidebarMenuButton>
+            </form>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
 
       <SidebarRail />
     </Sidebar>

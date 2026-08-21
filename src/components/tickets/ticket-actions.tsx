@@ -5,6 +5,7 @@ import {
   RotateCcwIcon,
   ShieldAlertIcon,
   ThumbsDownIcon,
+  UserPlusIcon,
   WrenchIcon,
   XIcon,
 } from "lucide-react";
@@ -26,6 +27,7 @@ import {
   reopenTicket,
   resolveTicket,
   resumeTicket,
+  selfAssignTicket,
   startWork,
   verifyTicket,
 } from "@/lib/actions/tickets";
@@ -67,6 +69,18 @@ export function TicketActions({
         technicians={technicians}
         currentAssigneeIds={ticket.assigneeIds}
         mode="manage"
+      />
+    );
+  }
+  if (can(actor, "selfAssignTicket", ticket).allowed) {
+    buttons.push(
+      <SimpleActionButton
+        key="selfAssign"
+        action={selfAssignTicket}
+        ticketId={ticket.id}
+        label="Assign to me"
+        pendingLabel="Assigning…"
+        icon={<UserPlusIcon className="size-4" />}
       />
     );
   }

@@ -149,8 +149,7 @@ export default async function PmChecklistsPage({
   const [templates, allAssets] = await Promise.all([
     prisma.pmChecklistTemplate.findMany({
       where,
-      orderBy:
-        view === "table" ? [SORT_COLUMNS[sort](dir), { id: "asc" }] : { name: "asc" },
+      orderBy: [SORT_COLUMNS[sort](dir), { id: "asc" }],
       skip: (page - 1) * perPage,
       take: perPage,
       include: {
@@ -186,7 +185,32 @@ export default async function PmChecklistsPage({
         <PmChecklistTemplateDialog />
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      {/* Mobile: search+sort share a row; view toggle gets its own row,
+          right-aligned, below. Sort works in both card and table view. */}
+      <div className="flex flex-col gap-2 md:hidden">
+        <div className="flex items-center gap-2">
+          <DebouncedSearchInput
+            placeholder="Search checklists and tasks…"
+            ariaLabel="Search PM checklists"
+            resetParams={["page"]}
+            className="flex-1 sm:max-w-none"
+          />
+          <SortButton
+            fields={SORT_FIELDS}
+            defaultSort={DEFAULT_SORT}
+            defaultDir={DEFAULT_DIR}
+          />
+        </div>
+        <div className="flex justify-end">
+          <ViewToggle
+            view={view}
+            cardHref={href({ ...state, view: "card" })}
+            tableHref={href({ ...state, view: "table" })}
+          />
+        </div>
+      </div>
+
+      <div className="hidden flex-wrap items-center justify-between gap-3 md:flex">
         <DebouncedSearchInput
           placeholder="Search checklists and tasks…"
           ariaLabel="Search PM checklists"

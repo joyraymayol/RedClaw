@@ -25,8 +25,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { holdTicket, type TicketActionState } from "@/lib/actions/tickets";
 
 const REASON_LABEL: Record<string, string> = {
-  WAITING_PARTS: "Waiting on parts",
-  WAITING_VENDOR: "Waiting on a vendor",
+  WAITING_PARTS: "Waiting for Parts",
+  WAITING_VENDOR: "Waiting for Vendor",
+  WAITING_EXTERNAL_TECHNICIAN: "Waiting for External Technician",
+  WAITING_TOOLS_EQUIPMENT: "Waiting for Tools/Equipment",
+  PRODUCTION_SCHEDULE_CONFLICT: "Production Schedule Conflict",
+  FURTHER_DIAGNOSIS_REQUIRED: "Further Diagnosis Required",
   OTHER: "Other",
 };
 

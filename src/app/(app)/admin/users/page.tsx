@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/table";
 import type { Prisma } from "@/generated/prisma/client";
 import { requireRole } from "@/lib/auth";
+import { canManageUser } from "@/lib/authz";
 import { DEPARTMENT_LABELS, DEPARTMENTS, departmentLabel } from "@/lib/constants/org";
 import { formatDateTime } from "@/lib/format";
 import { prisma } from "@/lib/prisma";
@@ -249,7 +250,7 @@ export default async function AdminUsersPage({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-1">
+        <div className="hidden flex-wrap items-center gap-1 md:flex">
           {FILTERS.map((f) => {
             const active = f.key === filter.key;
             return (
@@ -276,11 +277,43 @@ export default async function AdminUsersPage({
             );
           })}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full items-center gap-2 md:hidden">
+          <UsersSearch className="flex-1 sm:max-w-none" />
+          <SortButton fields={SORT_FIELDS} defaultSort="" defaultDir="asc" />
+        </div>
+        <div className="hidden items-center gap-2 md:flex">
           <SortButton fields={SORT_FIELDS} defaultSort="" defaultDir="asc" />
           <ColumnsToggle />
           <UsersSearch />
         </div>
+      </div>
+
+      {/* Mobile: pill-style filter chips, matching the Tickets page's
+          mobile status tabs. */}
+      <div className="-mx-4 flex items-center gap-1 overflow-x-auto px-4 md:hidden">
+        {FILTERS.map((f) => {
+          const active = f.key === filter.key;
+          return (
+            <Link
+              key={f.key}
+              href={tableHref({ ...state, filter: f.key })}
+              className={cn(
+                "flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-xs transition-colors",
+                active ? "bg-primary/15 font-medium text-primary" : "bg-muted text-muted-foreground"
+              )}
+            >
+              {f.label}
+              <span
+                className={cn(
+                  "rounded-full px-1 py-0.5 text-[10px] tabular-nums",
+                  active ? "bg-primary/20" : "bg-background"
+                )}
+              >
+                {countByFilter.get(f.key) ?? 0}
+              </span>
+            </Link>
+          );
+        })}
       </div>
 
       <div className="overflow-x-auto rounded-lg border">
@@ -411,7 +444,12 @@ export default async function AdminUsersPage({
                 )}
                 <TableCell className="sticky right-0 border-l bg-background align-top group-hover:bg-muted lg:align-middle">
                   <div className="flex w-20 justify-center">
-                    <UserActionsDialog user={u} isSelf={u.id === admin.id} />
+                    <UserActionsDialog
+                      user={u}
+                      isSelf={u.id === admin.id}
+                      canManage={canManageUser(admin, u)}
+                      isViewerAdmin={admin.role === "ADMIN"}
+                    />
                   </div>
                 </TableCell>
               </TableRow>

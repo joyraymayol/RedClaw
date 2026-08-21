@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { requireActiveUser } from "@/lib/auth";
 import { departmentLabel } from "@/lib/constants/org";
+import { randomGreeting } from "@/lib/greetings";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -19,7 +20,7 @@ export default async function DashboardPage() {
       <div className="space-y-1">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">
-            Welcome, {user.name.split(" ")[0]}
+            {randomGreeting()}, {user.name.split(" ")[0]}
           </h1>
           <Badge variant="secondary" className="font-mono text-[10px]">
             {user.role}

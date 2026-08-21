@@ -91,6 +91,18 @@ export function isQaHigher(actor: Actor): boolean {
 }
 
 /**
+ * May `actor` manage `target`'s account (role, position, account status)?
+ * ADMIN may manage anyone; a HEAD only within their own department. Department
+ * reassignment itself is never covered by this check — it's ADMIN-only,
+ * enforced separately where department is actually written.
+ */
+export function canManageUser(actor: Actor, target: { department: Department | null }): boolean {
+  if (actor.status !== "ACTIVE" || actor.role === null) return false;
+  if (actor.role === "ADMIN") return true;
+  return actor.role === "HEAD" && actor.department !== null && actor.department === target.department;
+}
+
+/**
  * Which ticket TYPES may this actor create? MAINTENANCE is open to any active
  * employee (so non-Maintenance staff can raise repairs — the only type they
  * may raise). PREVENTIVE_MAINTENANCE and MACHINE_SETUP are Maintenance-lead
@@ -153,6 +165,15 @@ export function can(actor: Actor, action: TicketAction, ticket?: TicketContext):
     // ── Admin lifecycle actions ─────────────────────────────────────────
     case "assignTicket": {
       if (!hasRole(actor, "ADMIN", "HEAD")) return deny("Only admins may assign tickets");
+      break;
+    }
+
+    // A Maintenance technician claiming an unassigned ticket for themself —
+    // covers shifts with no head/supervisor on duty to run assignTicket.
+    case "selfAssignTicket": {
+      if (!(actor.department === "MAINTENANCE" && hasRole(actor, "TECHNICIAN"))) {
+        return deny("Only Maintenance technicians may self-assign");
+      }
       break;
     }
 

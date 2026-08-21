@@ -8,6 +8,7 @@ import {
   UsersIcon,
 } from "lucide-react";
 
+import { ProductionPlanListCard } from "@/components/production-plans/production-plan-list-card";
 import { ProductionPlanStatusBadge } from "@/components/production-plans/production-plan-status-badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { DebouncedSearchInput } from "@/components/ui/debounced-search-input";
@@ -203,7 +204,16 @@ export default async function ProductionPlansPage({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex items-center gap-2 md:hidden">
+        <DebouncedSearchInput
+          placeholder="Search form number…"
+          ariaLabel="Search production plans"
+          resetParams={["page"]}
+          className="flex-1 sm:max-w-none"
+        />
+        <SortButton fields={SORT_FIELDS} defaultSort="" defaultDir="asc" />
+      </div>
+      <div className="hidden flex-wrap items-center justify-between gap-3 md:flex">
         <DebouncedSearchInput
           placeholder="Search form number…"
           ariaLabel="Search production plans"
@@ -213,70 +223,85 @@ export default async function ProductionPlansPage({
         <SortButton fields={SORT_FIELDS} defaultSort="" defaultDir="asc" />
       </div>
 
-      <div className="overflow-x-auto rounded-lg border">
-        <Table className="[&_td]:px-4 [&_td]:py-3 [&_th]:px-4">
-          <TableHeader>
-            <TableRow>
-              <SortableHead column="formNumber" state={state}>
-                Form no.
-              </SortableHead>
-              <SortableHead column="schedule" state={state} className="hidden md:table-cell">
-                Schedule
-              </SortableHead>
-              <SortableHead column="effective" state={state} className="hidden lg:table-cell">
-                Effective
-              </SortableHead>
-              <SortableHead column="machines" state={state}>
-                Machines
-              </SortableHead>
-              <SortableHead column="status" state={state}>
-                Status
-              </SortableHead>
-              <SortableHead column="preparedBy" state={state} className="hidden lg:table-cell">
-                Prepared by
-              </SortableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {plans.length === 0 && (
+      {/* Mobile: card list */}
+      <div className="space-y-3 md:hidden">
+        {plans.length === 0 && (
+          <p className="py-10 text-center text-sm text-muted-foreground">
+            {q ? `No plans match "${q}".` : "No production plans yet."}
+          </p>
+        )}
+        {plans.map((p) => (
+          <ProductionPlanListCard key={p.id} plan={p} />
+        ))}
+      </div>
+
+      {/* Desktop: unchanged table */}
+      <div className="hidden md:block">
+        <div className="overflow-x-auto rounded-lg border">
+          <Table className="[&_td]:px-4 [&_td]:py-3 [&_th]:px-4">
+            <TableHeader>
               <TableRow>
-                <TableCell
-                  colSpan={6}
-                  className="py-10 text-center text-sm text-muted-foreground"
-                >
-                  {q ? `No plans match "${q}".` : "No production plans yet."}
-                </TableCell>
+                <SortableHead column="formNumber" state={state}>
+                  Form no.
+                </SortableHead>
+                <SortableHead column="schedule" state={state} className="hidden md:table-cell">
+                  Schedule
+                </SortableHead>
+                <SortableHead column="effective" state={state} className="hidden lg:table-cell">
+                  Effective
+                </SortableHead>
+                <SortableHead column="machines" state={state}>
+                  Machines
+                </SortableHead>
+                <SortableHead column="status" state={state}>
+                  Status
+                </SortableHead>
+                <SortableHead column="preparedBy" state={state} className="hidden lg:table-cell">
+                  Prepared by
+                </SortableHead>
               </TableRow>
-            )}
-            {plans.map((p) => (
-              <TableRow key={p.id}>
-                <TableCell>
-                  <Link
-                    href={`/production-plans/${p.id}`}
-                    className={cn(buttonVariants({ variant: "outline", size: "xs" }), "font-mono")}
+            </TableHeader>
+            <TableBody>
+              {plans.length === 0 && (
+                <TableRow>
+                  <TableCell
+                    colSpan={6}
+                    className="py-10 text-center text-sm text-muted-foreground"
                   >
-                    {p.formNumber}
-                  </Link>
-                </TableCell>
-                <TableCell className="hidden text-muted-foreground md:table-cell">
-                  {formatDate(p.scheduleFrom)} – {formatDate(p.scheduleTo)}
-                </TableCell>
-                <TableCell className="hidden text-muted-foreground lg:table-cell">
-                  {formatDate(p.effectiveDate)}
-                </TableCell>
-                <TableCell className="tabular-nums text-muted-foreground">
-                  {p._count.rows}
-                </TableCell>
-                <TableCell>
-                  <ProductionPlanStatusBadge status={p.status} />
-                </TableCell>
-                <TableCell className="hidden text-muted-foreground lg:table-cell">
-                  {p.preparedBy.name}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+                    {q ? `No plans match "${q}".` : "No production plans yet."}
+                  </TableCell>
+                </TableRow>
+              )}
+              {plans.map((p) => (
+                <TableRow key={p.id}>
+                  <TableCell>
+                    <Link
+                      href={`/production-plans/${p.id}`}
+                      className={cn(buttonVariants({ variant: "outline", size: "xs" }), "font-mono")}
+                    >
+                      {p.formNumber}
+                    </Link>
+                  </TableCell>
+                  <TableCell className="hidden text-muted-foreground md:table-cell">
+                    {formatDate(p.scheduleFrom)} – {formatDate(p.scheduleTo)}
+                  </TableCell>
+                  <TableCell className="hidden text-muted-foreground lg:table-cell">
+                    {formatDate(p.effectiveDate)}
+                  </TableCell>
+                  <TableCell className="tabular-nums text-muted-foreground">
+                    {p._count.rows}
+                  </TableCell>
+                  <TableCell>
+                    <ProductionPlanStatusBadge status={p.status} />
+                  </TableCell>
+                  <TableCell className="hidden text-muted-foreground lg:table-cell">
+                    {p.preparedBy.name}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
       <PaginationBar

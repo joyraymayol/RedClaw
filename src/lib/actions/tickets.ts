@@ -12,6 +12,7 @@ import {
   adminRecipients,
   createNotification,
   maintenanceLeads,
+  maintenanceStaff,
   notifyUsers,
   qaLeads,
   supervisors,
@@ -143,7 +144,12 @@ export async function createTicket(
         data: { ticketId: ticket.id, fromStatus: null, toStatus: "OPEN", changedById: user.id },
       });
 
-      await notifyUsers(tx, await adminRecipients(tx), {
+      // Admins/heads (department-agnostic) plus every Maintenance-department
+      // user (any role) — since anyone in Maintenance can now self-assign,
+      // not just leads, everyone who could pick this up needs to know it
+      // exists. notifyUsers dedupes, so overlap between the two sets (e.g. a
+      // Maintenance HEAD appears in both) is harmless.
+      await notifyUsers(tx, [...(await adminRecipients(tx)), ...(await maintenanceStaff(tx))], {
         type: "TICKET_NEEDS_ASSIGNMENT",
         title: `${ticket.ticketNumber} needs assignment`,
         body: ticket.title,
@@ -940,6 +946,145 @@ export async function assignTicket(
         body: ticket.title,
         linkPath: `/tickets/${ticketId}`,
         actorId: admin.id,
+      });
+    });
+
+    revalidatePath("/tickets");
+    revalidatePath(`/tickets/${ticketId}`);
+    return { success: true };
+  });
+}
+
+// A Maintenance technician claiming an OPEN/REOPENED ticket for themself —
+// same transition and priority-interrupt behavior as assignTicket, just with
+// a fixed, single-member team (the actor) and no admin/head required, so
+// work can start on shifts with no lead on duty.
+export async function selfAssignTicket(
+  _prevState: TicketActionState,
+  formData: FormData
+): Promise<TicketActionState> {
+  return runAction(async () => {
+    const actor = await requireActiveUser();
+    const parsed = ticketIdSchema.safeParse({ ticketId: formData.get("ticketId") });
+    if (!parsed.success) return { error: parsed.error.issues[0].message };
+    const { ticketId } = parsed.data;
+
+    const ticket = await prisma.ticket.findUnique({
+      where: { id: ticketId },
+      include: openAssignmentsInclude,
+    });
+    if (!ticket) return { error: "Ticket not found." };
+    assertCan(actor, "selfAssignTicket", toTicketContext(ticket));
+
+    const [technician] = (await loadActiveTechnicians([actor.id])) ?? [];
+    if (!technician) return { error: "Your account isn't an active technician." };
+
+    // Priority interrupt (plan §2), mirrored from assignTicket: claiming a
+    // HIGH/CRITICAL ticket while mid-repair on something else bumps that
+    // ticket to hold and starts this one right away.
+    const busyTickets = await prisma.ticket.findMany({
+      where: {
+        status: "IN_PROGRESS",
+        assignments: { some: { technicianId: actor.id, unassignedAt: null } },
+      },
+      include: openAssignmentsInclude,
+    });
+    const shouldPreempt =
+      busyTickets.length > 0 && (ticket.priority === "HIGH" || ticket.priority === "CRITICAL");
+
+    await prisma.$transaction(async (tx) => {
+      // Close any stale open rows first — mirrors assignTicket's REOPENED guard.
+      await tx.ticketAssignment.updateMany({
+        where: { ticketId, unassignedAt: null },
+        data: { unassignedAt: new Date() },
+      });
+
+      if (shouldPreempt) {
+        for (const busyTicket of busyTickets) {
+          const { count: heldCount } = await tx.ticket.updateMany({
+            where: { id: busyTicket.id, status: "IN_PROGRESS" },
+            data: { status: "ON_HOLD", holdReason: "PREEMPTED_BY_HIGHER_PRIORITY" },
+          });
+          if (heldCount === 0) {
+            throw new ConflictError("Your active ticket changed — refresh and retry.");
+          }
+          await tx.ticketStatusHistory.create({
+            data: {
+              ticketId: busyTicket.id,
+              fromStatus: "IN_PROGRESS",
+              toStatus: "ON_HOLD",
+              changedById: actor.id,
+              note: `Preempted by higher-priority ticket ${ticket.ticketNumber}`,
+            },
+          });
+          await notifyUsers(
+            tx,
+            busyTicket.assignments.map((a) => a.technicianId),
+            {
+              type: "TICKET_ON_HOLD",
+              title: `${busyTicket.ticketNumber} put on hold`,
+              body: `Preempted by higher-priority ticket ${ticket.ticketNumber}`,
+              linkPath: `/tickets/${busyTicket.id}`,
+              actorId: actor.id,
+            }
+          );
+        }
+
+        const { count } = await tx.ticket.updateMany({
+          where: { id: ticketId, status: ticket.status },
+          data: { status: "IN_PROGRESS", startedAt: ticket.startedAt ?? new Date() },
+        });
+        if (count === 0) throw new ConflictError("Ticket changed state — refresh and retry.");
+        await tx.ticketStatusHistory.create({
+          data: {
+            ticketId,
+            fromStatus: ticket.status,
+            toStatus: "IN_PROGRESS",
+            changedById: actor.id,
+            note: `Self-assigned by ${actor.name} — preempts ${busyTickets.map((t) => t.ticketNumber).join(", ")}`,
+          },
+        });
+        await tx.ticketAssignment.create({
+          data: {
+            ticketId,
+            technicianId: actor.id,
+            assignedById: actor.id,
+            reason: "PREEMPTED_BY_HIGHER_PRIORITY",
+          },
+        });
+      } else {
+        const { count } = await tx.ticket.updateMany({
+          where: { id: ticketId, status: ticket.status },
+          data: { status: "ASSIGNED" },
+        });
+        if (count === 0) throw new ConflictError("Ticket changed state — refresh and retry.");
+        await tx.ticketStatusHistory.create({
+          data: {
+            ticketId,
+            fromStatus: ticket.status,
+            toStatus: "ASSIGNED",
+            changedById: actor.id,
+            note: `Self-assigned by ${actor.name}`,
+          },
+        });
+        await tx.ticketAssignment.create({
+          data: {
+            ticketId,
+            technicianId: actor.id,
+            assignedById: actor.id,
+            reason: ticket.status === "REOPENED" ? ("REOPENED" as const) : ("INITIAL_ASSIGN" as const),
+          },
+        });
+      }
+
+      // Visibility for leads who weren't around to make the call themselves —
+      // notifyUsers already drops the actor, so this never self-notifies.
+      await notifyUsers(tx, await maintenanceLeads(tx), {
+        type: "TICKET_ASSIGNED",
+        title: `${ticket.ticketNumber} self-assigned by ${actor.name}`,
+        body: ticket.title,
+        linkPath: `/tickets/${ticketId}`,
+        actorId: actor.id,
       });
     });
 

@@ -27,6 +27,7 @@ import {
   USER_TABLE_COLUMNS,
   type UserColumnKey,
 } from "@/lib/constants/users-table";
+import { cn } from "@/lib/utils";
 
 /** Replace the URL with updated params, dropping `page` so a new
     search/page-size always starts from the first page. */
@@ -47,7 +48,7 @@ function useParamNavigation() {
   };
 }
 
-export function UsersSearch() {
+export function UsersSearch({ className }: { className?: string } = {}) {
   const searchParams = useSearchParams();
   const navigate = useParamNavigation();
   const urlQuery = searchParams.get("q") ?? "";
@@ -75,7 +76,7 @@ export function UsersSearch() {
   }
 
   return (
-    <div className="relative w-full sm:w-80">
+    <div className={cn("relative w-full sm:w-80", className)}>
       <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input
         type="search"

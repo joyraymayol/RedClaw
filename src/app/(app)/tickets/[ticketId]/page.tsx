@@ -85,11 +85,14 @@ export default async function TicketDetailPage({
   const ctx = toTicketContext(ticket);
 
   // Requesters and technicians only see their own tickets; admin/supervisor/
-  // head see everything. `can()` is still the real gate on every action —
-  // this just keeps someone from reading a ticket that isn't theirs.
+  // head see everything; a Maintenance technician can also open a ticket
+  // they could self-assign to, or nothing they could act on would be
+  // reachable. `can()` is still the real gate on every action — this just
+  // keeps someone from reading a ticket that isn't theirs.
   const isParticipant = ticket.requesterId === user.id || ctx.assigneeIds.includes(user.id);
   const isStaff = user.role === "ADMIN" || user.role === "SUPERVISOR" || user.role === "HEAD";
-  if (!isParticipant && !isStaff) notFound();
+  const canSelfAssign = can(user, "selfAssignTicket", ctx).allowed;
+  if (!isParticipant && !isStaff && !canSelfAssign) notFound();
 
   const technicians =
     user.role === "ADMIN" || user.role === "HEAD"

@@ -5,6 +5,7 @@ import {
   assertCan,
   can,
   canCreateTicketType,
+  canManageUser,
   canPreparePlan,
   ForbiddenError,
   type Actor,
@@ -124,6 +125,46 @@ describe("canPreparePlan", () => {
   it("denies non-ACTIVE or role-less accounts even in Production", () => {
     expect(canPreparePlan(actor({ department: "PRODUCTION", status: "DISABLED" }))).toBe(false);
     expect(canPreparePlan(actor({ department: "PRODUCTION", role: null }))).toBe(false);
+  });
+});
+
+describe("canManageUser", () => {
+  const maintHead = actor({ id: "mh", role: UserRole.HEAD, department: "MAINTENANCE" });
+  const prodHead = actor({ id: "ph", role: UserRole.HEAD, department: "PRODUCTION" });
+  const maintTarget = { department: "MAINTENANCE" as const };
+  const prodTarget = { department: "PRODUCTION" as const };
+
+  it("lets ADMIN manage anyone, regardless of department", () => {
+    expect(canManageUser(admin, maintTarget)).toBe(true);
+    expect(canManageUser(admin, prodTarget)).toBe(true);
+    expect(canManageUser(admin, { department: null })).toBe(true);
+  });
+
+  it("lets a HEAD manage only users in their own department", () => {
+    expect(canManageUser(maintHead, maintTarget)).toBe(true);
+    expect(canManageUser(maintHead, prodTarget)).toBe(false);
+    expect(canManageUser(prodHead, prodTarget)).toBe(true);
+    expect(canManageUser(prodHead, maintTarget)).toBe(false);
+  });
+
+  it("denies a HEAD with no department of their own, even against a null-department target", () => {
+    const deptlessHead = actor({ role: UserRole.HEAD, department: null });
+    expect(canManageUser(deptlessHead, { department: null })).toBe(false);
+  });
+
+  it("denies non-ADMIN, non-HEAD roles regardless of department match", () => {
+    for (const a of [requester, technician, supervisor]) {
+      expect(canManageUser({ ...a, department: "MAINTENANCE" }, maintTarget)).toBe(false);
+    }
+  });
+
+  it("denies non-ACTIVE or role-less accounts", () => {
+    expect(canManageUser(actor({ role: UserRole.ADMIN, status: "DISABLED" }), maintTarget)).toBe(
+      false
+    );
+    expect(canManageUser(actor({ role: null, department: "MAINTENANCE" }), maintTarget)).toBe(
+      false
+    );
   });
 });
 
@@ -336,6 +377,50 @@ describe("head actions", () => {
   });
 });
 
+describe("selfAssignTicket", () => {
+  const maintTech = actor({ id: "mt", role: UserRole.TECHNICIAN, department: "MAINTENANCE" });
+  const otherDeptTech = actor({ id: "odt", role: UserRole.TECHNICIAN, department: "PRODUCTION" });
+
+  it("lets a Maintenance technician claim an OPEN or REOPENED ticket", () => {
+    expect(can(maintTech, "selfAssignTicket", ticket({ status: TicketStatus.OPEN })).allowed).toBe(
+      true
+    );
+    expect(
+      can(maintTech, "selfAssignTicket", ticket({ status: TicketStatus.REOPENED })).allowed
+    ).toBe(true);
+  });
+
+  it("denies a technician outside Maintenance", () => {
+    expect(
+      can(otherDeptTech, "selfAssignTicket", ticket({ status: TicketStatus.OPEN })).allowed
+    ).toBe(false);
+  });
+
+  it("denies non-technicians, even Maintenance heads/supervisors/admins", () => {
+    const t = ticket({ status: TicketStatus.OPEN });
+    expect(can(admin, "selfAssignTicket", t).allowed).toBe(false);
+    expect(
+      can(actor({ role: UserRole.SUPERVISOR, department: "MAINTENANCE" }), "selfAssignTicket", t)
+        .allowed
+    ).toBe(false);
+    expect(
+      can(actor({ role: UserRole.HEAD, department: "MAINTENANCE" }), "selfAssignTicket", t).allowed
+    ).toBe(false);
+  });
+
+  it("denies once the ticket is already assigned or further along", () => {
+    for (const status of [
+      TicketStatus.ASSIGNED,
+      TicketStatus.IN_PROGRESS,
+      TicketStatus.PENDING_VERIFICATION,
+      TicketStatus.CLOSED,
+      TicketStatus.CANCELLED,
+    ]) {
+      expect(can(maintTech, "selfAssignTicket", ticket({ status })).allowed).toBe(false);
+    }
+  });
+});
+
 describe("updateAssignees", () => {
   it("allows admin/head while ASSIGNED, IN_PROGRESS, or ON_HOLD", () => {
     for (const status of [TicketStatus.ASSIGNED, TicketStatus.IN_PROGRESS, TicketStatus.ON_HOLD]) {
@@ -489,6 +574,7 @@ describe("full matrix sanity", () => {
   const ALL_ACTIONS: TicketAction[] = [
     "createTicket",
     "assignTicket",
+    "selfAssignTicket",
     "updateAssignees",
     "reflagAssets",
     "startWork",

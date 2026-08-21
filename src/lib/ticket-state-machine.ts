@@ -17,6 +17,7 @@ import {
 
 export type TicketTransitionAction =
   | "assignTicket" // admin assigns a team (OPEN) or routes a reopened ticket back (REOPENED)
+  | "selfAssignTicket" // a Maintenance technician claims an unassigned ticket themself
   | "startWork" // technician begins (subject to the 1-active-ticket guard)
   | "holdTicket" // technician pauses with a reason, or admin preempts
   | "resumeTicket" // technician picks a held ticket back up (1-active guard again)
@@ -38,6 +39,7 @@ type TransitionRule = {
 
 export const TICKET_TRANSITIONS: Record<TicketTransitionAction, TransitionRule> = {
   assignTicket: { from: [TicketStatus.OPEN, TicketStatus.REOPENED], to: TicketStatus.ASSIGNED },
+  selfAssignTicket: { from: [TicketStatus.OPEN, TicketStatus.REOPENED], to: TicketStatus.ASSIGNED },
   startWork: { from: [TicketStatus.ASSIGNED], to: TicketStatus.IN_PROGRESS },
   holdTicket: { from: [TicketStatus.IN_PROGRESS], to: TicketStatus.ON_HOLD },
   resumeTicket: { from: [TicketStatus.ON_HOLD], to: TicketStatus.IN_PROGRESS },
@@ -92,6 +94,10 @@ export const TERMINAL_STATUSES: readonly TicketStatus[] = [
 export const TECHNICIAN_HOLD_REASONS: readonly HoldReason[] = [
   HoldReason.WAITING_PARTS,
   HoldReason.WAITING_VENDOR,
+  HoldReason.WAITING_EXTERNAL_TECHNICIAN,
+  HoldReason.WAITING_TOOLS_EQUIPMENT,
+  HoldReason.PRODUCTION_SCHEDULE_CONFLICT,
+  HoldReason.FURTHER_DIAGNOSIS_REQUIRED,
   HoldReason.OTHER,
 ];
 

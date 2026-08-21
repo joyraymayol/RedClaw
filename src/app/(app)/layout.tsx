@@ -69,7 +69,9 @@ export default async function AppLayout({
                 {user.name}
               </span>
               <NotificationBell userId={user.id} />
-              <SignOutButton />
+              <div className="hidden md:block">
+                <SignOutButton />
+              </div>
               <ThemeToggle />
             </div>
           </header>

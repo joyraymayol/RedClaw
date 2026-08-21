@@ -101,6 +101,13 @@ export function maintenanceLeads(tx: Prisma.TransactionClient): Promise<string[]
   });
 }
 
+/** Every active Maintenance-department user, any role — since any of them
+ *  can self-assign to a ticket, all of them need to know one exists, not
+ *  just the leads who used to be the only ones who could hand it out. */
+export function maintenanceStaff(tx: Prisma.TransactionClient): Promise<string[]> {
+  return activeUserIds(tx, { department: "MAINTENANCE" });
+}
+
 /** QA leads (QA HEAD/SUPERVISOR) plus any ADMIN — mirrors `isQaHigher`. */
 export function qaLeads(tx: Prisma.TransactionClient): Promise<string[]> {
   return activeUserIds(tx, {
