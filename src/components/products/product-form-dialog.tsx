@@ -114,8 +114,7 @@ export function ProductFormDialog({ product }: { product?: Product }) {
               <DialogHeader>
                 <DialogTitle>{isEdit ? "Edit product" : "Add product"}</DialogTitle>
                 <DialogDescription>
-                  Products a Production Machines asset can be flagged capable
-                  of running, and switched between.
+                  Manage and view the plastic products manufactured by your production machines.
                 </DialogDescription>
               </DialogHeader>
 

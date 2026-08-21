@@ -4,6 +4,7 @@ import {
   CalendarRange,
   ClipboardCheck,
   LayoutDashboard,
+  PillBottle,
   Ticket,
   Users,
   type LucideIcon,
@@ -23,6 +24,7 @@ export const NAV_LINKS: NavLink[] = [
   { href: "/tickets", label: "Tickets", icon: Ticket },
   { href: "/production-plans", label: "Production plans", icon: CalendarRange },
   { href: "/assets", label: "Assets", icon: Boxes },
+  { href: "/products", label: "Products", icon: PillBottle },
   { href: "/knowledge-base", label: "Knowledge base", icon: BookOpen },
   {
     href: "/pm-checklists",

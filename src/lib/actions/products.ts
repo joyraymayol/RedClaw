@@ -37,7 +37,7 @@ export async function createProduct(
     throw e;
   }
 
-  revalidatePath("/assets/settings");
+  revalidatePath("/products");
   return { success: true };
 }
 
@@ -66,7 +66,7 @@ export async function updateProduct(
     throw e;
   }
 
-  revalidatePath("/assets/settings");
+  revalidatePath("/products");
   return { success: true };
 }
 
@@ -83,6 +83,6 @@ export async function deleteProduct(productId: string): Promise<ProductActionSta
     throw e;
   }
 
-  revalidatePath("/assets/settings");
+  revalidatePath("/products");
   return { success: true };
 }

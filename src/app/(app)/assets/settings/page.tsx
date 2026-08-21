@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 
 import { AssetCategoryFormDialog } from "@/components/assets/asset-category-form-dialog";
 import { AssetTypeFormDialog } from "@/components/assets/asset-type-form-dialog";
-import { ProductFormDialog } from "@/components/assets/product-form-dialog";
 import { SettingsTabs } from "@/components/assets/settings-tabs";
 import { Badge } from "@/components/ui/badge";
 import { DebouncedSearchInput } from "@/components/ui/debounced-search-input";
@@ -43,8 +42,6 @@ export default async function AssetSettingsPage({
     catPage?: string;
     typeQ?: string;
     typePage?: string;
-    prodQ?: string;
-    prodPage?: string;
   }>;
 }) {
   await requireRole("ADMIN", "HEAD");
@@ -52,10 +49,8 @@ export default async function AssetSettingsPage({
 
   const catQ = rawParams.catQ?.trim() ?? "";
   const typeQ = rawParams.typeQ?.trim() ?? "";
-  const prodQ = rawParams.prodQ?.trim() ?? "";
   const catPageReq = clampPage(Number(rawParams.catPage));
   const typePageReq = clampPage(Number(rawParams.typePage));
-  const prodPageReq = clampPage(Number(rawParams.prodPage));
   const perPage = DEFAULT_PER_PAGE;
 
   const categoryWhere: Prisma.AssetCategoryWhereInput = catQ
@@ -74,30 +69,19 @@ export default async function AssetSettingsPage({
         ],
       }
     : {};
-  const productWhere: Prisma.ProductWhereInput = prodQ
-    ? {
-        OR: [
-          { name: { contains: prodQ, mode: "insensitive" } },
-          { description: { contains: prodQ, mode: "insensitive" } },
-        ],
-      }
-    : {};
 
-  const [categoryTotal, typeTotal, productTotal, allCategories] = await Promise.all([
+  const [categoryTotal, typeTotal, allCategories] = await Promise.all([
     prisma.assetCategory.count({ where: categoryWhere }),
     prisma.assetType.count({ where: typeWhere }),
-    prisma.product.count({ where: productWhere }),
     prisma.assetCategory.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
   ]);
 
   const categoryTotalPages = Math.max(1, Math.ceil(categoryTotal / perPage));
   const typeTotalPages = Math.max(1, Math.ceil(typeTotal / perPage));
-  const productTotalPages = Math.max(1, Math.ceil(productTotal / perPage));
   const catPage = Math.min(catPageReq, categoryTotalPages);
   const typePage = Math.min(typePageReq, typeTotalPages);
-  const prodPage = Math.min(prodPageReq, productTotalPages);
 
-  const [categories, types, products] = await Promise.all([
+  const [categories, types] = await Promise.all([
     prisma.assetCategory.findMany({
       where: categoryWhere,
       orderBy: { name: "asc" },
@@ -109,12 +93,6 @@ export default async function AssetSettingsPage({
       orderBy: { name: "asc" },
       include: { category: { select: { name: true } } },
       skip: (typePage - 1) * perPage,
-      take: perPage,
-    }),
-    prisma.product.findMany({
-      where: productWhere,
-      orderBy: { name: "asc" },
-      skip: (prodPage - 1) * perPage,
       take: perPage,
     }),
   ]);
@@ -133,7 +111,6 @@ export default async function AssetSettingsPage({
         <TabsList>
           <TabsTrigger value="categories">Categories</TabsTrigger>
           <TabsTrigger value="types">Asset types</TabsTrigger>
-          <TabsTrigger value="products">Products</TabsTrigger>
         </TabsList>
 
         <TabsPanel value="categories" className="space-y-3 pt-2">
@@ -159,10 +136,10 @@ export default async function AssetSettingsPage({
             {categories.map((c) => (
               <div
                 key={c.id}
-                className="flex flex-wrap items-start justify-between gap-3 rounded-lg border p-4"
+                className="flex items-start justify-between gap-3 rounded-lg border p-4"
               >
-                <div>
-                  <div className="flex items-center gap-2">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
                     <h3 className="font-medium">{c.name}</h3>
                     {c.tracksProducts && <Badge variant="secondary">Tracks products</Badge>}
                     {c.supportsParentAsset && (
@@ -173,7 +150,9 @@ export default async function AssetSettingsPage({
                     <p className="mt-1 text-sm text-muted-foreground">{c.description}</p>
                   )}
                 </div>
-                <AssetCategoryFormDialog category={c} />
+                <div className="shrink-0">
+                  <AssetCategoryFormDialog category={c} />
+                </div>
               </div>
             ))}
           </div>
@@ -241,56 +220,6 @@ export default async function AssetSettingsPage({
               itemLabel="asset type"
               hrefFor={(p) =>
                 settingsHref(rawParams, { tab: "types", typePage: p > 1 ? p : undefined })
-              }
-            />
-          )}
-        </TabsPanel>
-
-        <TabsPanel value="products" className="space-y-3 pt-2">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-medium">Products</h2>
-            <ProductFormDialog />
-          </div>
-
-          <DebouncedSearchInput
-            paramName="prodQ"
-            placeholder="Search products…"
-            ariaLabel="Search products"
-            resetParams={["prodPage"]}
-          />
-
-          {products.length === 0 ? (
-            <p className="rounded-lg border py-10 text-center text-sm text-muted-foreground">
-              {prodQ ? `No products match "${prodQ}".` : "No products yet."}
-            </p>
-          ) : (
-            <div className="overflow-hidden rounded-lg border">
-              <ul className="divide-y">
-                {products.map((p) => (
-                  <li key={p.id} className="flex items-start justify-between gap-3 p-3">
-                    <div>
-                      <span className="text-sm font-medium">{p.name}</span>
-                      {p.description && (
-                        <p className="mt-0.5 text-xs text-muted-foreground">{p.description}</p>
-                      )}
-                    </div>
-                    <ProductFormDialog product={p} />
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {productTotal > 0 && (
-            <PaginationBar
-              total={productTotal}
-              page={prodPage}
-              totalPages={productTotalPages}
-              rangeStart={(prodPage - 1) * perPage + 1}
-              rangeEnd={Math.min(prodPage * perPage, productTotal)}
-              itemLabel="product"
-              hrefFor={(p) =>
-                settingsHref(rawParams, { tab: "products", prodPage: p > 1 ? p : undefined })
               }
             />
           )}
